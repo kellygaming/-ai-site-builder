@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import { SiteBuilderChat } from "@/components/ui/chat-input";
 import { GithubConnectBanner } from "./github-connect-banner";
 import { VercelConnectBanner } from "./vercel-connect-banner";
+import { ChatPanel } from "./chat-panel";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DiscussionPage() {
@@ -25,7 +25,7 @@ export default async function DiscussionPage() {
         <GithubConnectBanner githubLogin={githubConnection?.github_login ?? null} />
         <VercelConnectBanner connected={Boolean(vercelConnection)} />
       </div>
-      <SiteBuilderChat />
+      <ChatPanel />
     </main>
   );
 }

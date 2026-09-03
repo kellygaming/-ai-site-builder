@@ -72,9 +72,13 @@ const CODE_FILE_ACCEPT =
 export interface SiteBuilderChatProps {
   /** Called when the user submits a prompt (Enter, without Shift). */
   onSubmit?: (value: string, files: File[]) => void;
+  /** Locks the input while a previous submission is still in flight. */
+  disabled?: boolean;
+  /** Hides the "Quel site voulez-vous créer ?" title — once a conversation has started. */
+  hideTitle?: boolean;
 }
 
-export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
+export function SiteBuilderChat({ onSubmit, disabled, hideTitle }: SiteBuilderChatProps) {
   const [value, setValue] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
@@ -107,6 +111,7 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
   };
 
   const submit = () => {
+    if (disabled) return;
     if (!value.trim() && files.length === 0) return;
     onSubmit?.(value.trim(), files);
     setValue("");
@@ -123,9 +128,11 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
 
   return (
     <div className="flex flex-col items-center w-full max-w-4xl mx-auto p-4 space-y-8">
-      <h1 className="text-4xl font-bold text-text font-display text-center">
-        Quel site voulez-vous créer ?
-      </h1>
+      {!hideTitle && (
+        <h1 className="text-4xl font-bold text-text font-display text-center">
+          Quel site voulez-vous créer ?
+        </h1>
+      )}
 
       <div className="w-full">
         {/* Hidden pickers, triggered by the paperclip and the two quick-action cards below. */}
@@ -193,12 +200,17 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
             <Textarea
               ref={textareaRef}
               value={value}
+              disabled={disabled}
               onChange={(e) => {
                 setValue(e.target.value);
                 adjustHeight();
               }}
               onKeyDown={handleKeyDown}
-              placeholder="Décrivez le site que vous voulez, l'agent s'occupe du reste…"
+              placeholder={
+                disabled
+                  ? "L'agent travaille sur votre site…"
+                  : "Décrivez le site que vous voulez, l'agent s'occupe du reste…"
+              }
               className={cn(
                 "w-full px-4 py-3",
                 "resize-none",
@@ -240,8 +252,9 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
               <button
                 type="button"
                 onClick={submit}
+                disabled={disabled}
                 className={cn(
-                  "px-1.5 py-1.5 rounded-lg text-sm transition-colors border border-border hover:border-border-strong hover:bg-surface-2 flex items-center justify-between gap-1",
+                  "px-1.5 py-1.5 rounded-lg text-sm transition-colors border border-border hover:border-border-strong hover:bg-surface-2 flex items-center justify-between gap-1 disabled:opacity-60 disabled:cursor-not-allowed",
                   value.trim() ? "bg-accent text-white border-accent" : "text-muted",
                 )}
               >
