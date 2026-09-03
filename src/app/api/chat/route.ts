@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { decryptToken } from "@/lib/crypto";
-import { createGithubRepo, commitFile } from "@/lib/tools/github";
+import { createGithubRepo, commitFiles } from "@/lib/tools/github";
 import { deployToVercel } from "@/lib/tools/vercel";
 import { captureScreenshot } from "@/lib/tools/screenshot";
 import { DESIGN_REFERENCE, FRONTEND_DESIGN_GUIDANCE } from "@/lib/design-reference";
@@ -45,8 +45,12 @@ Règles :
   ta conception dessus : reprends la palette, l'ambiance, la structure qu'elle montre.
 - Si le client joint du code existant, pars de ce code pour l'améliorer plutôt que de tout
   réécrire à zéro, sauf s'il demande explicitement une refonte complète.
-- Toujours au moins un fichier "index.html" autonome, avec le CSS et le JS inline ou en
-  fichiers séparés (style.css, script.js) référencés depuis index.html.
+- Livre un SEUL fichier "index.html" autonome, CSS et JS inline dedans. Pas de fichiers
+  séparés : la fonction serveur a un budget de temps serré, chaque fichier en plus coûte
+  du temps de génération. N'ajoute un second fichier que si le client demande
+  explicitement plusieurs pages.
+- Va à l'essentiel : une page dense et soignée vaut mieux qu'une page interminable. Vise
+  du HTML compact, sans commentaires superflus ni répétitions de styles.
 - Design soigné, moderne, responsive, en français, cohérent avec ce que le client décrit.
 - Pas de dépendances externes (pas de CDN obligatoire) sauf polices Google Fonts si besoin.
 - Une capture d'écran du site réellement déployé t'est montrée après chaque outil : si
@@ -249,9 +253,7 @@ export async function POST(request: Request) {
         );
         repoUrl = repo.htmlUrl;
 
-        for (const file of input.files) {
-          await commitFile(githubToken, repo.owner, repo.repo, file.path, file.content, `Ajoute ${file.path}`);
-        }
+        await commitFiles(githubToken, repo.owner, repo.repo, input.files, "Crée le site");
 
         const deployment = await deployToVercel(vercelToken, vercelTeamId, input.repo_name, input.files);
         deployUrl = deployment.url;
@@ -280,16 +282,13 @@ export async function POST(request: Request) {
           throw new Error("Aucun site existant à modifier dans cette conversation.");
         }
 
-        for (const file of input.files) {
-          await commitFile(
-            githubToken,
-            siteState.githubOwner,
-            siteState.githubRepo,
-            file.path,
-            file.content,
-            `Modifie ${file.path}`,
-          );
-        }
+        await commitFiles(
+          githubToken,
+          siteState.githubOwner,
+          siteState.githubRepo,
+          input.files,
+          `Met à jour ${input.files.map((f) => f.path).join(", ")}`,
+        );
 
         const mergedFiles = new Map((siteState.currentFiles ?? []).map((f) => [f.path, f]));
         for (const file of input.files) mergedFiles.set(file.path, file);
@@ -386,7 +385,7 @@ export async function POST(request: Request) {
 
   const first = await client.messages.create({
     model: "claude-sonnet-5",
-    max_tokens: 16000,
+    max_tokens: 8000,
     system: BASE_SYSTEM_PROMPT,
     tools,
     messages,
@@ -431,7 +430,7 @@ export async function POST(request: Request) {
 
   const review = await client.messages.create({
     model: "claude-sonnet-5",
-    max_tokens: 16000,
+    max_tokens: 8000,
     system: BASE_SYSTEM_PROMPT,
     tools: result1.ok ? [UPDATE_TOOL] : tools,
     messages,
