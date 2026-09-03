@@ -22,6 +22,11 @@ déjà créé dans cette conversation. Tu conçois/modifies un site statique (HT
 framework ni étape de build).
 
 Règles :
+- Si le client joint une image, c'est une référence visuelle directe (site existant à
+  reproduire/inspirer, capture d'un design qu'il aime, logo, charte de couleurs...) — ancre
+  ta conception dessus : reprends la palette, l'ambiance, la structure qu'elle montre.
+- Si le client joint du code existant, pars de ce code pour l'améliorer plutôt que de tout
+  réécrire à zéro, sauf s'il demande explicitement une refonte complète.
 - Toujours au moins un fichier "index.html" autonome, avec le CSS et le JS inline ou en
   fichiers séparés (style.css, script.js) référencés depuis index.html.
 - Design soigné, moderne, responsive, en français, cohérent avec ce que le client décrit.
@@ -104,8 +109,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Non connecté." }, { status: 401 });
   }
 
-  const { message, conversationId: incomingConversationId } = await request.json();
-  if (typeof message !== "string" || !message.trim()) {
+  const {
+    message,
+    conversationId: incomingConversationId,
+    images,
+    textFiles,
+  }: {
+    message: string;
+    conversationId?: string;
+    images?: { mediaType: string; data: string }[];
+    textFiles?: { name: string; content: string }[];
+  } = await request.json();
+
+  const hasAttachments = (images?.length ?? 0) > 0 || (textFiles?.length ?? 0) > 0;
+  if (typeof message !== "string" || (!message.trim() && !hasAttachments)) {
     return NextResponse.json({ error: "Message vide." }, { status: 400 });
   }
 
@@ -174,7 +191,7 @@ export async function POST(request: Request) {
   } else {
     const { data: newConversation, error } = await supabase
       .from("conversations")
-      .insert({ user_id: user.id, title: message.slice(0, 80) })
+      .insert({ user_id: user.id, title: (message.trim() || "Nouveau site").slice(0, 80) })
       .select("id")
       .single();
 
@@ -307,7 +324,29 @@ export async function POST(request: Request) {
     return { repoUrl, deployUrl, resultBlocks, ok: statusPayload.status === "success" };
   }
 
-  const userTurn: Anthropic.MessageParam = { role: "user", content: message };
+  const userContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[] = [];
+  if (message.trim()) userContent.push({ type: "text", text: message.trim() });
+  for (const file of textFiles ?? []) {
+    userContent.push({
+      type: "text",
+      text: `Fichier joint "${file.name}" :\n\`\`\`\n${file.content}\n\`\`\``,
+    });
+  }
+  for (const image of images ?? []) {
+    userContent.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: image.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+        data: image.data,
+      },
+    });
+  }
+  if (userContent.length === 0) {
+    userContent.push({ type: "text", text: "(message vide)" });
+  }
+
+  const userTurn: Anthropic.MessageParam = { role: "user", content: userContent };
   await persist("user", userTurn.content);
   const messages: Anthropic.MessageParam[] = [...history, userTurn];
 

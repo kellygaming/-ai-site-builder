@@ -11,21 +11,46 @@ interface Turn {
   deployUrl?: string;
 }
 
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const MAX_TEXT_FILE_BYTES = 200_000;
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 export function ChatPanel() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
 
-  async function handleSubmit(value: string) {
-    if (!value.trim()) return;
-    setTurns((t) => [...t, { role: "user", text: value }]);
+  async function handleSubmit(value: string, files: File[]) {
+    if (!value.trim() && files.length === 0) return;
+
+    const images: { mediaType: string; data: string }[] = [];
+    const textFiles: { name: string; content: string }[] = [];
+
+    for (const file of files) {
+      if (SUPPORTED_IMAGE_TYPES.has(file.type)) {
+        images.push({ mediaType: file.type, data: await fileToBase64(file) });
+      } else if (file.size <= MAX_TEXT_FILE_BYTES) {
+        textFiles.push({ name: file.name, content: await file.text() });
+      }
+    }
+
+    const label = value.trim() || (files.length > 0 ? `📎 ${files.length} fichier(s) joint(s)` : "");
+    setTurns((t) => [...t, { role: "user", text: label }]);
     setLoading(true);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: value, conversationId }),
+        body: JSON.stringify({ message: value, conversationId, images, textFiles }),
       });
       const data = await res.json();
 
@@ -110,7 +135,7 @@ export function ChatPanel() {
       )}
 
       <SiteBuilderChat
-        onSubmit={(value) => handleSubmit(value)}
+        onSubmit={(value, files) => handleSubmit(value, files)}
         disabled={loading}
         hideTitle={turns.length > 0}
       />
