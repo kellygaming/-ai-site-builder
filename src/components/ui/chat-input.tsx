@@ -11,6 +11,7 @@ import {
   ArrowUpIcon,
   Paperclip,
   PlusIcon,
+  X,
 } from "lucide-react";
 
 /* Chat input — adapted from a v0.dev community component. Colors
@@ -65,22 +66,51 @@ function useAutoResizeTextarea({ minHeight, maxHeight }: UseAutoResizeTextareaPr
   return { textareaRef, adjustHeight };
 }
 
+const CODE_FILE_ACCEPT =
+  ".js,.jsx,.ts,.tsx,.html,.htm,.css,.json,.py,.php,.vue,.svelte,.zip,.rb,.java,.go,.rs,.c,.cpp,.md";
+
 export interface SiteBuilderChatProps {
   /** Called when the user submits a prompt (Enter, without Shift). */
-  onSubmit?: (value: string) => void;
+  onSubmit?: (value: string, files: File[]) => void;
 }
 
 export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
   const [value, setValue] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
     minHeight: 60,
     maxHeight: 200,
   });
 
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const codeInputRef = useRef<HTMLInputElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+
+  const addFiles = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    setFiles((prev) => [...prev, ...Array.from(list)]);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Keeps the textarea sized correctly when a quick-action card fills it
+  // programmatically (adjustHeight is otherwise only called from onChange).
+  useEffect(() => {
+    adjustHeight();
+  }, [value, adjustHeight]);
+
+  const fillPrompt = (text: string) => {
+    setValue((v) => v || text);
+    textareaRef.current?.focus();
+  };
+
   const submit = () => {
-    if (!value.trim()) return;
-    onSubmit?.(value.trim());
+    if (!value.trim() && files.length === 0) return;
+    onSubmit?.(value.trim(), files);
     setValue("");
+    setFiles([]);
     adjustHeight(true);
   };
 
@@ -98,6 +128,66 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
       </h1>
 
       <div className="w-full">
+        {/* Hidden pickers, triggered by the paperclip and the two quick-action cards below. */}
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={codeInputRef}
+          type="file"
+          accept={CODE_FILE_ACCEPT}
+          multiple
+          hidden
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={attachInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+
+        {files.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-3">
+            {files.map((file, i) => (
+              <span
+                key={`${file.name}-${i}`}
+                className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-text-secondary"
+              >
+                {file.type.startsWith("image/") ? (
+                  <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+                ) : (
+                  <FileUp className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span className="max-w-[160px] truncate">{file.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeFile(i)}
+                  className="text-muted hover:text-text"
+                  aria-label={`Retirer ${file.name}`}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <div className="relative bg-surface rounded-xl border border-border">
           <div className="overflow-y-auto">
             <Textarea
@@ -130,6 +220,7 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => attachInputRef.current?.click()}
                 className="group p-2 hover:bg-surface-2 rounded-lg transition-colors flex items-center gap-1"
               >
                 <Paperclip className="w-4 h-4 text-text" />
@@ -167,18 +258,24 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
           <ActionButton
             icon={<ImageIcon className="w-4 h-4" />}
             label="Donnez-moi une image du site que vous voulez, je pars de là"
+            onClick={() => imageInputRef.current?.click()}
           />
           <ActionButton
             icon={<FileUp className="w-4 h-4" />}
             label="Vous avez déjà un code à améliorer ? Envoyez-le moi"
+            onClick={() => codeInputRef.current?.click()}
           />
           <ActionButton
             icon={<MonitorIcon className="w-4 h-4" />}
             label="Vous voulez une page d'accueil pour votre entreprise ?"
+            onClick={() => fillPrompt("Je veux une page d'accueil pour mon entreprise.")}
           />
           <ActionButton
             icon={<ShoppingCart className="w-4 h-4" />}
             label="Vous voulez un site e-commerce avec gestion de stock ? On y va pas à pas"
+            onClick={() =>
+              fillPrompt("Je veux un site e-commerce avec gestion de stock, on y va pas à pas.")
+            }
           />
         </div>
       </div>
@@ -189,12 +286,14 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
 interface ActionButtonProps {
   icon: React.ReactNode;
   label: string;
+  onClick?: () => void;
 }
 
-function ActionButton({ icon, label }: ActionButtonProps) {
+function ActionButton({ icon, label, onClick }: ActionButtonProps) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className="flex items-start gap-3 p-4 text-left bg-surface hover:bg-surface-2 rounded-xl border border-border hover:border-border-strong text-text-secondary hover:text-text transition-colors"
     >
       <span className="mt-0.5 shrink-0 text-accent-text">{icon}</span>
