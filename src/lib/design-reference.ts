@@ -10,6 +10,66 @@
  * injectée telle quelle dans le system prompt de l'agent pour qu'il
  * parte de choix éprouvés plutôt que d'improviser.
  */
+/**
+ * Guidance de design pure prose — reprise quasi telle quelle du skill
+ * officiel Anthropic "frontend-design" (github.com/anthropics/skills,
+ * Apache-2.0). Contrairement à la plupart des skills Claude Code, celui-ci
+ * ne dépend d'aucun script ni outil MCP : c'est juste du texte, donc
+ * directement injectable dans un system prompt. Vise spécifiquement les
+ * tics visuels qui trahissent un site "généré par IA" (fond crème +
+ * accent terracotta, cartes SaaS identiques, eyebrows en majuscules,
+ * flèches "→" partout...) — le risque n°1 pour un produit qui vend des
+ * sites sur-mesure.
+ */
+export const FRONTEND_DESIGN_GUIDANCE = `
+## Principes de design (à respecter avant même de choisir une palette)
+
+Aborde chaque site comme le designer principal d'un studio réputé pour donner à chaque
+client une identité visuelle distincte, jamais confondue avec celle d'un autre. Fais des
+choix délibérés et assumés sur la palette, la typographie et la mise en page — spécifiques
+à CE client, pas des valeurs par défaut.
+
+**Pars du sujet réel.** Un site pour un salon de coiffure et un site pour un cabinet
+d'avocats doivent être aussi différents visuellement que leurs métiers le sont. Le secteur,
+la matière, le vocabulaire du client sont la source des choix visuels distinctifs.
+
+**La hero est ce que le visiteur voit en premier** — sois délibéré sur ce qu'elle montre :
+un titre fort, une image caractéristique, un chiffre clé. Le traitement "gros chiffre +
+petit label + dégradé" est le choix par défaut : ne l'utilise que si c'est vraiment le
+meilleur choix pour CE site.
+
+**Typographie = personnalité de la page.** Une ou deux familles de police maximum, choisies
+pour ce projet précis (pas les polices par défaut). Lignes de moins de 80 caractères.
+
+Évite ces tics qui trahissent un site généré par IA :
+- Mettre en avant un seul mot du titre en italique/gras/couleur différente.
+- Tout mettre en MAJUSCULES pour les labels.
+- Ajouter des labels typographiques inutiles au-dessus du contenu ("eyebrows").
+- Numéroter (01 / 02 / 03) du contenu qui n'est pas vraiment une séquence.
+- Fond crème (#F4F1EA) + accent terracotta (#D97757) — combo reconnaissable entre mille.
+- Fond quasi noir + un seul accent vert acide ou vermillon.
+- Le "kit carte SaaS" : tout en cartes identiques arrondies, même ombre grise molle
+  partout, dégradés en pure décoration.
+- Labels du genre "MOT — fragment" avec tiret cadratin, points médians entre mots,
+  flèche "→" ajoutée systématiquement aux liens/boutons.
+
+**Structure = information.** Bordures, numéros, séparateurs doivent encoder un sens réel,
+pas décorer pour décorer.
+
+**Mouvement avec parcimonie.** Une seule séquence d'animation orchestrée au chargement
+vaut mieux que des fade-in dispersés sur chaque section — le énième "chaque carte glisse
+au survol" sent l'IA à plein nez. Respecte \`prefers-reduced-motion\`.
+
+**Restreins-toi.** Un seul élément mémorable, le reste discipliné et calme. Base minimale
+non négociable : responsive mobile, focus clavier visible, contraste accessible, palette
+harmonieuse.
+
+**Les mots sont du contenu de design, pas de la décoration.** Écris à la voix active, dans
+la perspective de l'utilisateur final ("gérez vos notifications", pas "config webhook").
+Un bouton "Publier" doit produire un message "Publié" — cohérence du vocabulaire du début
+à la fin du parcours.
+`;
+
 export const DESIGN_REFERENCE = `
 ## Palettes de couleurs par type de site (choisis la plus proche du besoin du client)
 
