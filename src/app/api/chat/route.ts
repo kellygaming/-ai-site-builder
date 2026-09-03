@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { decryptToken } from "@/lib/crypto";
 import { createGithubRepo, commitFile } from "@/lib/tools/github";
 import { deployToVercel } from "@/lib/tools/vercel";
+import { DESIGN_REFERENCE } from "@/lib/design-reference";
 
 const client = new Anthropic();
 
@@ -19,7 +20,12 @@ Règles :
 - Pas de dépendances externes (pas de CDN obligatoire) sauf polices Google Fonts si besoin.
 - repo_name en kebab-case, dérivé du nom du site.
 - Une fois l'outil appelé et son résultat reçu, réponds au client en français, brièvement,
-  en confirmant que le site est en ligne et en donnant le lien.`;
+  en confirmant que le site est en ligne et en donnant le lien.
+
+Utilise la référence design ci-dessous comme point de départ (palette + police adaptées au
+type de site demandé, règles UX toujours respectées) plutôt que d'improviser à l'aveugle —
+adapte les couleurs/polices exactes si le client a une préférence explicite.
+${DESIGN_REFERENCE}`;
 
 const CREATE_AND_DEPLOY_TOOL: Anthropic.Tool = {
   name: "create_and_deploy_site",
