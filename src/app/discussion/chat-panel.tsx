@@ -1,14 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { ExternalLink, GitFork, Loader2 } from "lucide-react";
+import { ExternalLink, GitFork, Loader2, Rocket } from "lucide-react";
 import { SiteBuilderChat } from "@/components/ui/chat-input";
+
+interface SiteFile {
+  path: string;
+  content: string;
+}
 
 interface Turn {
   role: "user" | "assistant";
   text: string;
-  repoUrl?: string;
-  deployUrl?: string;
 }
 
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
@@ -27,6 +30,9 @@ export function ChatPanel() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const [published, setPublished] = useState<{ repoUrl: string; deployUrl: string } | null>(null);
 
   async function handleSubmit(value: string, files: File[]) {
     if (!value.trim() && files.length === 0) return;
@@ -42,7 +48,7 @@ export function ChatPanel() {
       }
     }
 
-    const label = value.trim() || (files.length > 0 ? `📎 ${files.length} fichier(s) joint(s)` : "");
+    const label = value.trim() || `📎 ${files.length} fichier(s) joint(s)`;
     setTurns((t) => [...t, { role: "user", text: label }]);
     setLoading(true);
 
@@ -57,22 +63,20 @@ export function ChatPanel() {
       if (data.conversationId) setConversationId(data.conversationId);
 
       if (!res.ok) {
-        setTurns((t) => [
-          ...t,
-          { role: "assistant", text: data.error ?? "Une erreur est survenue." },
-        ]);
+        setTurns((t) => [...t, { role: "assistant", text: data.error ?? "Une erreur est survenue." }]);
         return;
       }
 
-      setTurns((t) => [
-        ...t,
-        {
-          role: "assistant",
-          text: data.reply ?? "",
-          repoUrl: data.repoUrl,
-          deployUrl: data.deployUrl,
-        },
-      ]);
+      setTurns((t) => [...t, { role: "assistant", text: data.reply ?? "" }]);
+
+      const indexFile = (data.files as SiteFile[] | undefined)?.find((f) =>
+        f.path.endsWith("index.html"),
+      );
+      if (indexFile) {
+        setPreviewHtml(indexFile.content);
+        // Le site a changé : la version publiée n'est plus à jour.
+        setPublished(null);
+      }
     } catch {
       setTurns((t) => [
         ...t,
@@ -83,8 +87,39 @@ export function ChatPanel() {
     }
   }
 
+  async function handlePublish() {
+    if (!conversationId) return;
+    setPublishing(true);
+    try {
+      const res = await fetch("/api/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversationId }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setTurns((t) => [...t, { role: "assistant", text: data.error ?? "Échec de la publication." }]);
+        return;
+      }
+
+      setPublished({ repoUrl: data.repoUrl, deployUrl: data.deployUrl });
+      setTurns((t) => [
+        ...t,
+        { role: "assistant", text: `Votre site est en ligne : ${data.deployUrl}` },
+      ]);
+    } catch {
+      setTurns((t) => [
+        ...t,
+        { role: "assistant", text: "Publication impossible. Réessayez dans un instant." },
+      ]);
+    } finally {
+      setPublishing(false);
+    }
+  }
+
   return (
-    <div className="flex w-full max-w-4xl flex-col gap-6">
+    <div className="flex w-full max-w-5xl flex-col gap-6">
       {turns.length > 0 && (
         <div className="flex flex-col gap-4">
           {turns.map((turn, i) => (
@@ -97,40 +132,67 @@ export function ChatPanel() {
               }
             >
               <p className="whitespace-pre-wrap leading-relaxed">{turn.text}</p>
-              {(turn.repoUrl || turn.deployUrl) && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {turn.repoUrl && (
-                    <a
-                      href={turn.repoUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface-2 px-3 py-1.5 text-xs text-text hover:border-accent transition-colors"
-                    >
-                      <GitFork className="h-3.5 w-3.5" />
-                      Voir le code
-                    </a>
-                  )}
-                  {turn.deployUrl && (
-                    <a
-                      href={turn.deployUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent-hover transition-colors"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Voir le site en ligne
-                    </a>
-                  )}
-                </div>
-              )}
             </div>
           ))}
           {loading && (
             <div className="flex items-center gap-2 self-start text-xs text-text-secondary">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              L&apos;agent conçoit et déploie votre site…
+              L&apos;agent conçoit votre site…
             </div>
           )}
+        </div>
+      )}
+
+      {previewHtml && (
+        <div className="w-full overflow-hidden rounded-2xl border border-border bg-surface">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+            <span className="font-mono-ui text-xs text-text-secondary">
+              Aperçu — pas encore publié
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              {published && (
+                <>
+                  <a
+                    href={published.repoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-text hover:border-accent transition-colors"
+                  >
+                    <GitFork className="h-3.5 w-3.5" />
+                    Code
+                  </a>
+                  <a
+                    href={published.deployUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-text hover:border-accent transition-colors"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Site en ligne
+                  </a>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={handlePublish}
+                disabled={publishing || loading}
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-hover disabled:opacity-60 transition-colors"
+              >
+                {publishing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Rocket className="h-3.5 w-3.5" />
+                )}
+                {published ? "Republier" : "Publier mon site"}
+              </button>
+            </div>
+          </div>
+          <iframe
+            title="Aperçu du site"
+            srcDoc={previewHtml}
+            sandbox="allow-scripts"
+            className="h-[600px] w-full bg-white"
+          />
         </div>
       )}
 
