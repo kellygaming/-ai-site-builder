@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { SiteBuilderChat } from "@/components/ui/chat-input";
 import { GithubConnectBanner } from "./github-connect-banner";
+import { VercelConnectBanner } from "./vercel-connect-banner";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DiscussionPage() {
@@ -13,15 +14,17 @@ export default async function DiscussionPage() {
     redirect("/connexion?next=/discussion");
   }
 
-  const { data: githubConnection } = await supabase
-    .from("github_connections")
-    .select("github_login")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const [{ data: githubConnection }, { data: vercelConnection }] = await Promise.all([
+    supabase.from("github_connections").select("github_login").eq("user_id", user.id).maybeSingle(),
+    supabase.from("vercel_connections").select("id").eq("user_id", user.id).maybeSingle(),
+  ]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-16">
-      <GithubConnectBanner githubLogin={githubConnection?.github_login ?? null} />
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <GithubConnectBanner githubLogin={githubConnection?.github_login ?? null} />
+        <VercelConnectBanner connected={Boolean(vercelConnection)} />
+      </div>
       <SiteBuilderChat />
     </main>
   );

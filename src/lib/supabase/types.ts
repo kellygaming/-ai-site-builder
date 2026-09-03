@@ -115,6 +115,33 @@ export type Database = {
         }
         Relationships: []
       }
+      vercel_connections: {
+        Row: {
+          access_token_encrypted: string
+          created_at: string
+          id: string
+          user_id: string
+          vercel_team_id: string | null
+          vercel_user_id: string
+        }
+        Insert: {
+          access_token_encrypted: string
+          created_at?: string
+          id?: string
+          user_id: string
+          vercel_team_id?: string | null
+          vercel_user_id: string
+        }
+        Update: {
+          access_token_encrypted?: string
+          created_at?: string
+          id?: string
+          user_id?: string
+          vercel_team_id?: string | null
+          vercel_user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
