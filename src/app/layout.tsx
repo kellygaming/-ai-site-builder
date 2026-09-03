@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Space_Grotesk, JetBrains_Mono } from "next/font/google";
+import { LogoMark } from "@/components/ui/logo-mark";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -27,6 +29,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} h-full`}
     >
       <body className="min-h-full flex flex-col bg-bg text-text">
+        <header className="flex items-center px-6 py-4">
+          <Link href="/" className="flex items-center gap-2">
+            <LogoMark />
+            <span className="font-display text-sm font-bold text-text">AI Site Builder</span>
+          </Link>
+        </header>
         {children}
       </body>
     </html>
