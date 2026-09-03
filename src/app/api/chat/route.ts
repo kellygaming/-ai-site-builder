@@ -84,6 +84,29 @@ interface SiteFile {
   content: string;
 }
 
+/**
+ * Le modèle peut atteindre le plafond de tokens en plein milieu du JSON de
+ * l'outil : l'API livre alors un bloc tool_use dont l'input est incomplet
+ * (`files` absent, tronqué, ou dernier fichier coupé au milieu du HTML).
+ * On valide donc au lieu de faire confiance au typage.
+ */
+function parseSiteFiles(raw: unknown): SiteFile[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+
+  const files: SiteFile[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const { path, content } = entry as Record<string, unknown>;
+    if (typeof path !== "string" || !path.trim()) return null;
+    if (typeof content !== "string" || !content.trim()) return null;
+    files.push({ path: path.trim(), content });
+  }
+  return files;
+}
+
+const TRUNCATED_REPLY =
+  "Le site que vous demandez est trop long : la génération a été coupée avant la fin, je préfère ne rien vous montrer d'incomplet. Redemandez-le en plus simple (3 sections maximum, par exemple « accueil, services, contact »), ou demandez-moi de le construire section par section — je commence par l'accueil et on ajoute le reste ensuite.";
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -186,39 +209,80 @@ export async function POST(request: Request) {
   // 60s (plafond du plan Hobby) et écrire du HTML est lent (~60-100 tokens/s).
   // Raisonnement désactivé + effort bas + plafond de sortie serré = la seule
   // façon de tenir. Sur un plan Vercel Pro (300s), on peut tout relâcher.
-  const response = await client.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 3500,
-    thinking: { type: "disabled" },
-    output_config: { effort: "low" },
-    system: BASE_SYSTEM_PROMPT,
-    tools: [PREVIEW_TOOL],
-    messages,
-  });
-  await persist("assistant", response.content);
-
+  let response: Anthropic.Message;
+  try {
+    response = await client.messages.create({
+      model: "claude-sonnet-5",
+      max_tokens: 3500,
+      thinking: { type: "disabled" },
+      output_config: { effort: "low" },
+      system: BASE_SYSTEM_PROMPT,
+      tools: [PREVIEW_TOOL],
+      messages,
+    });
+  } catch (error) {
+    // Sans ce filet, une erreur de l'API remonte en 500 sans corps JSON : le
+    // client affichait alors "Connexion impossible", message trompeur qui
+    // masquait la vraie cause. On renvoie une erreur lisible et traçable.
+    console.error("[chat] appel Anthropic échoué", error);
+    return NextResponse.json(
+      {
+        conversationId,
+        error:
+          "L'agent n'a pas pu répondre (service de génération indisponible). Réessayez dans un instant.",
+      },
+      { status: 502 },
+    );
+  }
   const text = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
   const toolUse = response.content.find(
     (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
   );
 
-  if (!toolUse) {
-    return NextResponse.json({ conversationId, reply: text?.text ?? "" });
+  // stop_reason "max_tokens" = la réponse a été coupée net. Si elle contenait un
+  // appel d'outil, son JSON est forcément incomplet (même quand il se trouve
+  // être encore parsable) : le dernier fichier serait du HTML tranché au milieu.
+  const input = (toolUse?.input ?? {}) as Record<string, unknown>;
+  const files =
+    toolUse && response.stop_reason !== "max_tokens" ? parseSiteFiles(input.files) : null;
+
+  if (toolUse && !files) {
+    // Un tool_use inexploitable ne doit JAMAIS entrer dans l'historique :
+    // l'API exige un tool_result pour chaque tool_use, et on n'a rien de valide
+    // à lui associer — le tour suivant partirait en 400. On ne garde que du texte.
+    await persist("assistant", [{ type: "text", text: TRUNCATED_REPLY }]);
+    return NextResponse.json({ conversationId, reply: TRUNCATED_REPLY });
   }
 
-  const input = toolUse.input as { site_name: string; files: SiteFile[] };
+  await persist("assistant", response.content);
+
+  if (!toolUse || !files) {
+    return NextResponse.json({
+      conversationId,
+      reply:
+        text?.text ||
+        (response.stop_reason === "max_tokens"
+          ? TRUNCATED_REPLY
+          : "Je n'ai pas réussi à traiter cette demande. Reformulez-la en quelques mots."),
+    });
+  }
+
+  const siteName =
+    typeof input.site_name === "string" && input.site_name.trim()
+      ? input.site_name.trim()
+      : `site-${conversationId!.slice(0, 8)}`;
 
   // Fusionne avec la version précédente : le modèle peut ne renvoyer que les
   // fichiers touchés, on garde les autres tels quels.
   const merged = new Map(currentFiles.map((f) => [f.path, f]));
-  for (const file of input.files) merged.set(file.path, file);
+  for (const file of files) merged.set(file.path, file);
   const fullFileSet = Array.from(merged.values());
 
   await supabase
     .from("conversations")
     .update({
       current_files: fullFileSet as unknown as Json,
-      vercel_project_name: input.site_name,
+      vercel_project_name: siteName,
     })
     .eq("id", conversationId!);
 
