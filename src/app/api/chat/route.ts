@@ -14,7 +14,25 @@ import type { Json } from "@/lib/supabase/types";
 // pour ce genre de flux agentique multi-étapes.
 export const maxDuration = 60;
 
-const client = new Anthropic();
+/**
+ * Une clé API "identity-linked" (liée à un utilisateur plutôt qu'à un
+ * workspace) exige le header anthropic-workspace-id sur chaque requête, sinon
+ * l'API répond 400. On l'ajoute quand ANTHROPIC_WORKSPACE_ID est défini ; une
+ * clé classique liée à un workspace fonctionne sans.
+ */
+const client = new Anthropic(
+  process.env.ANTHROPIC_WORKSPACE_ID
+    ? { defaultHeaders: { "anthropic-workspace-id": process.env.ANTHROPIC_WORKSPACE_ID } }
+    : {},
+);
+
+/**
+ * Budget avant de renoncer à la passe d'auto-critique visuelle : capture +
+ * second appel Claude coûtent ~15-25s, impossibles à tenir si la génération a
+ * déjà mangé l'essentiel des 60s du plan Hobby. Au-delà, on livre directement
+ * le site avec ses liens plutôt que de laisser la fonction expirer.
+ */
+const VISUAL_REVIEW_BUDGET_MS = 30_000;
 
 const BASE_SYSTEM_PROMPT = `Tu es l'agent de construction de sites d'AI Site Builder. Le
 client te décrit en langage courant le site qu'il veut, ou te demande de modifier un site
@@ -100,6 +118,7 @@ interface SiteState {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const supabase = await createClient();
   const {
     data: { user },
@@ -210,7 +229,11 @@ export async function POST(request: Request) {
   }
 
   /** Exécute create_and_deploy_site / update_site, prend une capture du résultat, met Supabase à jour. */
-  async function runTool(toolUse: Anthropic.ToolUseBlock, withNote: boolean) {
+  async function runTool(
+    toolUse: Anthropic.ToolUseBlock,
+    withNote: boolean,
+    withScreenshot: boolean,
+  ) {
     let repoUrl: string | undefined;
     let deployUrl: string | undefined;
     let statusPayload: Record<string, unknown>;
@@ -311,9 +334,11 @@ export async function POST(request: Request) {
       },
     ];
 
-    if (deployUrl) {
+    let screenshotTaken = false;
+    if (deployUrl && withScreenshot) {
       const screenshot = await captureScreenshot(deployUrl);
       if (screenshot) {
+        screenshotTaken = true;
         resultBlocks.push({
           type: "image",
           source: { type: "base64", media_type: "image/png", data: screenshot },
@@ -321,7 +346,13 @@ export async function POST(request: Request) {
       }
     }
 
-    return { repoUrl, deployUrl, resultBlocks, ok: statusPayload.status === "success" };
+    return {
+      repoUrl,
+      deployUrl,
+      resultBlocks,
+      screenshotTaken,
+      ok: statusPayload.status === "success",
+    };
   }
 
   const userContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[] = [];
@@ -371,14 +402,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ conversationId, reply: text?.text ?? "" });
   }
 
-  // Tour 1 : construit/modifie le site, capture d'écran jointe pour auto-critique.
-  const result1 = await runTool(firstToolUse, true);
+  // Tour 1 : construit/modifie le site. La capture d'écran (et donc la passe
+  // d'auto-critique) n'est tentée que s'il reste assez de budget temps.
+  const budgetLeft = Date.now() - startedAt < VISUAL_REVIEW_BUDGET_MS;
+  const result1 = await runTool(firstToolUse, budgetLeft, budgetLeft);
   const toolResultTurn1: Anthropic.MessageParam = {
     role: "user",
     content: [{ type: "tool_result", tool_use_id: firstToolUse.id, content: result1.resultBlocks }],
   };
   await persist("user", toolResultTurn1.content);
   messages.push({ role: "assistant", content: first.content }, toolResultTurn1);
+
+  // Sans capture (budget épuisé, échec, ou déploiement raté), la relecture
+  // visuelle n'a plus d'objet : on répond directement plutôt que de brûler
+  // 15-20s de plus et risquer le timeout.
+  if (!result1.screenshotTaken) {
+    const reply = result1.ok
+      ? `Votre site est en ligne : ${result1.deployUrl}`
+      : "Le site n'a pas pu être déployé. Reformulez votre demande et réessayez.";
+    await persist("assistant", [{ type: "text", text: reply }]);
+    return NextResponse.json({
+      conversationId,
+      reply,
+      repoUrl: result1.repoUrl,
+      deployUrl: result1.deployUrl,
+    });
+  }
 
   const review = await client.messages.create({
     model: "claude-sonnet-5",
@@ -401,8 +450,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ conversationId, reply: text?.text ?? "", repoUrl, deployUrl });
   }
 
-  // Tour 2 (borné) : une correction visuelle max, puis réponse finale forcée sans outil.
-  const result2 = await runTool(correctionToolUse, false);
+  // Tour 2 (borné) : une correction visuelle max, sans nouvelle capture (le
+  // budget est déjà bien entamé), puis réponse finale forcée sans outil.
+  const result2 = await runTool(correctionToolUse, false, false);
   repoUrl = result2.repoUrl ?? repoUrl;
   deployUrl = result2.deployUrl ?? deployUrl;
 

@@ -11,7 +11,7 @@ import puppeteer from "puppeteer-core";
  */
 
 /** Attend que l'URL réponde 200 (une déploiement fraîche peut mettre 1-2s à se propager). */
-async function waitUntilLive(url: string, timeoutMs = 15000): Promise<boolean> {
+async function waitUntilLive(url: string, timeoutMs = 8000): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
@@ -39,7 +39,11 @@ export async function captureScreenshot(url: string): Promise<string | null> {
       headless: true,
     });
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle0", timeout: 20000 });
+    // domcontentloaded + court délai plutôt que networkidle0 : sur un site
+    // statique le rendu est déjà là, et networkidle0 peut coûter plusieurs
+    // secondes de plus qu'on n'a pas dans le budget de la fonction.
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
+    await new Promise((r) => setTimeout(r, 800));
     const buffer = await page.screenshot({ type: "png" });
     return Buffer.from(buffer).toString("base64");
   } catch {
