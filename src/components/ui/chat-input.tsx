@@ -6,9 +6,8 @@ import { cn } from "@/lib/utils";
 import {
   ImageIcon,
   FileUp,
-  Layers,
   MonitorIcon,
-  CircleUserRound,
+  ShoppingCart,
   ArrowUpIcon,
   Paperclip,
   PlusIcon,
@@ -164,12 +163,23 @@ export function SiteBuilderChat({ onSubmit }: SiteBuilderChatProps) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
-          <ActionButton icon={<ImageIcon className="w-4 h-4" />} label="Cloner une capture d'écran" />
-          <ActionButton icon={<Layers className="w-4 h-4" />} label="Importer depuis Figma" />
-          <ActionButton icon={<FileUp className="w-4 h-4" />} label="Importer un projet" />
-          <ActionButton icon={<MonitorIcon className="w-4 h-4" />} label="Page d'atterrissage" />
-          <ActionButton icon={<CircleUserRound className="w-4 h-4" />} label="Formulaire d'inscription" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 w-full">
+          <ActionButton
+            icon={<ImageIcon className="w-4 h-4" />}
+            label="Donnez-moi une image du site que vous voulez, je pars de là"
+          />
+          <ActionButton
+            icon={<FileUp className="w-4 h-4" />}
+            label="Vous avez déjà un code à améliorer ? Envoyez-le moi"
+          />
+          <ActionButton
+            icon={<MonitorIcon className="w-4 h-4" />}
+            label="Vous voulez une page d'accueil pour votre entreprise ?"
+          />
+          <ActionButton
+            icon={<ShoppingCart className="w-4 h-4" />}
+            label="Vous voulez un site e-commerce avec gestion de stock ? On y va pas à pas"
+          />
         </div>
       </div>
     </div>
@@ -185,10 +195,10 @@ function ActionButton({ icon, label }: ActionButtonProps) {
   return (
     <button
       type="button"
-      className="flex items-center gap-2 px-4 py-2 bg-surface hover:bg-surface-2 rounded-full border border-border text-text-secondary hover:text-text transition-colors"
+      className="flex items-start gap-3 p-4 text-left bg-surface hover:bg-surface-2 rounded-xl border border-border hover:border-border-strong text-text-secondary hover:text-text transition-colors"
     >
-      {icon}
-      <span className="text-xs">{label}</span>
+      <span className="mt-0.5 shrink-0 text-accent-text">{icon}</span>
+      <span className="text-sm leading-snug">{label}</span>
     </button>
   );
 }
