@@ -1,8 +1,13 @@
+"use client";
+
+import { useRouter } from "next/navigation";
 import { ArrowRight, GitFork } from "lucide-react";
 import { DecryptText } from "@/components/ui/decrypt-text";
 import { EclipseButton } from "@/components/ui/eclipse-button";
 
 export default function Home() {
+  const router = useRouter();
+
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-10 px-6 py-24 text-center">
       <span className="rounded-full border border-border px-3 py-1 font-mono-ui text-xs uppercase tracking-widest text-text-secondary">
@@ -29,6 +34,7 @@ export default function Home() {
           variant="primary"
           text="Créer mon site"
           rightIcon={<ArrowRight className="h-4 w-4" />}
+          onClick={() => router.push("/discussion")}
         />
         <EclipseButton
           variant="outline"
