@@ -39,6 +39,10 @@ Règles :
   dans une iframe : des fichiers séparés ne se chargeraient pas). N'ajoute d'autres fichiers
   que si le client demande explicitement plusieurs pages.
 - Sur une demande de modification, renvoie l'index.html COMPLET modifié, pas un extrait.
+- CONTRAINTE DURE : le fichier doit rester compact (environ 200 lignes de HTML, 10 Ko max).
+  Le serveur coupe la génération au-delà. Une page courte, dense et finie vaut infiniment
+  mieux qu'une page ambitieuse tronquée en plein milieu. Concentre-toi sur 3-4 sections
+  essentielles, du CSS ramassé (variables, pas de répétitions), zéro commentaire.
 - Design soigné, moderne, responsive, en français, cohérent avec ce que le client décrit.
 - Pas de dépendances externes sauf polices Google Fonts si besoin.
 - Accompagne toujours ton appel d'outil d'une phrase courte en français : ce que tu as fait
@@ -178,9 +182,15 @@ export async function POST(request: Request) {
   await persist("user", userContent);
   const messages: Anthropic.MessageParam[] = [...history, { role: "user", content: userContent }];
 
+  // Contraintes de latence, pas de préférence esthétique : la fonction meurt à
+  // 60s (plafond du plan Hobby) et écrire du HTML est lent (~60-100 tokens/s).
+  // Raisonnement désactivé + effort bas + plafond de sortie serré = la seule
+  // façon de tenir. Sur un plan Vercel Pro (300s), on peut tout relâcher.
   const response = await client.messages.create({
     model: "claude-sonnet-5",
-    max_tokens: 8000,
+    max_tokens: 3500,
+    thinking: { type: "disabled" },
+    output_config: { effort: "low" },
     system: BASE_SYSTEM_PROMPT,
     tools: [PREVIEW_TOOL],
     messages,

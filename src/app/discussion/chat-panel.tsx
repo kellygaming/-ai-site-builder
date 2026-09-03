@@ -58,7 +58,27 @@ export function ChatPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: value, conversationId, images, textFiles }),
       });
-      const data = await res.json();
+
+      // Un timeout de fonction renvoie une page d'erreur HTML, pas du JSON :
+      // on le distingue pour donner une consigne utile plutôt qu'un message
+      // générique de panne réseau.
+      const raw = await res.text();
+      let data: { conversationId?: string; reply?: string; error?: string; files?: SiteFile[] };
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        setTurns((t) => [
+          ...t,
+          {
+            role: "assistant",
+            text:
+              res.status === 504 || raw.includes("TIMEOUT")
+                ? "La génération a pris trop de temps et a été interrompue. Demandez un site plus simple (moins de sections), ou réessayez."
+                : "Le serveur a renvoyé une réponse inattendue. Réessayez dans un instant.",
+          },
+        ]);
+        return;
+      }
 
       if (data.conversationId) setConversationId(data.conversationId);
 
