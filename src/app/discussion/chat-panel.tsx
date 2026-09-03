@@ -14,6 +14,7 @@ interface Turn {
 export function ChatPanel() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loading, setLoading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
 
   async function handleSubmit(value: string) {
     if (!value.trim()) return;
@@ -24,9 +25,11 @@ export function ChatPanel() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: value }),
+        body: JSON.stringify({ message: value, conversationId }),
       });
       const data = await res.json();
+
+      if (data.conversationId) setConversationId(data.conversationId);
 
       if (!res.ok) {
         setTurns((t) => [

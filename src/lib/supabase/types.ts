@@ -20,21 +20,33 @@ export type Database = {
       conversations: {
         Row: {
           created_at: string
+          current_files: Json | null
+          github_owner: string | null
+          github_repo: string | null
           id: string
           title: string | null
           user_id: string
+          vercel_project_name: string | null
         }
         Insert: {
           created_at?: string
+          current_files?: Json | null
+          github_owner?: string | null
+          github_repo?: string | null
           id?: string
           title?: string | null
           user_id: string
+          vercel_project_name?: string | null
         }
         Update: {
           created_at?: string
+          current_files?: Json | null
+          github_owner?: string | null
+          github_repo?: string | null
           id?: string
           title?: string | null
           user_id?: string
+          vercel_project_name?: string | null
         }
         Relationships: []
       }
