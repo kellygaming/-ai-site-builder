@@ -1,4 +1,6 @@
+import { ArrowRight, GitFork } from "lucide-react";
 import { DecryptText } from "@/components/ui/decrypt-text";
+import { EclipseButton } from "@/components/ui/eclipse-button";
 
 export default function Home() {
   return (
@@ -21,6 +23,19 @@ export default function Home() {
         Décrivez le site que vous voulez, l&apos;agent le construit pour vous,
         le pousse sur GitHub et le déploie sur Vercel — en quelques minutes.
       </p>
+
+      <div className="flex flex-wrap items-center justify-center gap-4">
+        <EclipseButton
+          variant="primary"
+          text="Créer mon site"
+          rightIcon={<ArrowRight className="h-4 w-4" />}
+        />
+        <EclipseButton
+          variant="outline"
+          text="Voir sur GitHub"
+          leftIcon={<GitFork className="h-4 w-4" />}
+        />
+      </div>
 
       <DecryptText
         text="npx site-builder créer --et-déployer"
