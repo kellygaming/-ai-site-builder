@@ -20,7 +20,9 @@ export default async function DiscussionPage() {
   ]);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-16">
+    // min-h-0 est indispensable : sans lui, l'enfant en overflow-y-auto pousse
+    // la page entière au lieu de défiler dans son propre panneau.
+    <main className="flex min-h-0 flex-1 flex-col items-center gap-4 px-2 py-4">
       <div className="flex flex-wrap items-center justify-center gap-3">
         <GithubConnectBanner githubLogin={githubConnection?.github_login ?? null} />
         <VercelConnectBanner connected={Boolean(vercelConnection)} />

@@ -10,7 +10,6 @@ import {
   ShoppingCart,
   ArrowUpIcon,
   Paperclip,
-  PlusIcon,
   X,
 } from "lucide-react";
 
@@ -74,11 +73,15 @@ export interface SiteBuilderChatProps {
   onSubmit?: (value: string, files: File[]) => void;
   /** Locks the input while a previous submission is still in flight. */
   disabled?: boolean;
-  /** Hides the "Quel site voulez-vous créer ?" title — once a conversation has started. */
-  hideTitle?: boolean;
+  /**
+   * Mode "conversation en cours" : masque le titre d'accueil et les cartes de
+   * suggestion, et resserre les marges. Ces éléments servent à démarrer ; une
+   * fois le site affiché, ils volent la place à l'aperçu et aux échanges.
+   */
+  compact?: boolean;
 }
 
-export function SiteBuilderChat({ onSubmit, disabled, hideTitle }: SiteBuilderChatProps) {
+export function SiteBuilderChat({ onSubmit, disabled, compact }: SiteBuilderChatProps) {
   const [value, setValue] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const { textareaRef, adjustHeight } = useAutoResizeTextarea({
@@ -127,8 +130,13 @@ export function SiteBuilderChat({ onSubmit, disabled, hideTitle }: SiteBuilderCh
   };
 
   return (
-    <div className="flex flex-col items-center w-full max-w-4xl mx-auto p-4 space-y-8">
-      {!hideTitle && (
+    <div
+      className={cn(
+        "flex flex-col items-center w-full mx-auto",
+        compact ? "p-0" : "max-w-4xl p-4 space-y-8",
+      )}
+    >
+      {!compact && (
         <h1 className="text-4xl font-bold text-text font-display text-center">
           Quel site voulez-vous créer ?
         </h1>
@@ -244,13 +252,6 @@ export function SiteBuilderChat({ onSubmit, disabled, hideTitle }: SiteBuilderCh
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="px-2 py-1 rounded-lg text-sm text-text-secondary transition-colors border border-dashed border-border hover:border-border-strong hover:bg-surface-2 flex items-center justify-between gap-1"
-              >
-                <PlusIcon className="w-4 h-4" />
-                Projet
-              </button>
-              <button
-                type="button"
                 onClick={submit}
                 disabled={disabled}
                 className={cn(
@@ -267,6 +268,7 @@ export function SiteBuilderChat({ onSubmit, disabled, hideTitle }: SiteBuilderCh
           </div>
         </div>
 
+        {!compact && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 w-full">
           <ActionButton
             icon={<ImageIcon className="w-4 h-4" />}
@@ -291,6 +293,7 @@ export function SiteBuilderChat({ onSubmit, disabled, hideTitle }: SiteBuilderCh
             }
           />
         </div>
+        )}
       </div>
     </div>
   );

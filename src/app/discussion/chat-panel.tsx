@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { ExternalLink, GitFork, Loader2, Rocket } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ExternalLink, GitFork, Loader2, MessageSquare, Monitor, Plus, Rocket } from "lucide-react";
 import { SiteBuilderChat } from "@/components/ui/chat-input";
+import { cn } from "@/lib/utils";
 
 interface SiteFile {
   path: string;
@@ -54,8 +55,28 @@ export function ChatPanel() {
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewVersion, setPreviewVersion] = useState(0);
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState<{ repoUrl: string; deployUrl: string } | null>(null);
+  // Sur mobile les deux panneaux ne tiennent pas côte à côte : on bascule.
+  const [mobileTab, setMobileTab] = useState<"conversation" | "apercu">("conversation");
+
+  const turnsEndRef = useRef<HTMLDivElement>(null);
+  const started = turns.length > 0;
+
+  // Le dernier message doit rester visible sans que le client ait à faire
+  // défiler lui-même — sinon la réponse de l'agent passe inaperçue.
+  useEffect(() => {
+    turnsEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [turns, loading]);
+
+  function startNewSite() {
+    setTurns([]);
+    setConversationId(null);
+    setPreviewHtml(null);
+    setPublished(null);
+    setMobileTab("conversation");
+  }
 
   async function handleSubmit(value: string, files: File[]) {
     if (!value.trim() && files.length === 0) return;
@@ -106,17 +127,20 @@ export function ChatPanel() {
       if (data.conversationId) setConversationId(data.conversationId);
 
       if (!res.ok) {
-        setTurns((t) => [...t, { role: "assistant", text: data.error ?? "Une erreur est survenue." }]);
+        setTurns((t) => [
+          ...t,
+          { role: "assistant", text: data.error ?? "Une erreur est survenue." },
+        ]);
         return;
       }
 
       setTurns((t) => [...t, { role: "assistant", text: data.reply ?? "" }]);
 
-      const indexFile = (data.files as SiteFile[] | undefined)?.find((f) =>
-        f.path.endsWith("index.html"),
-      );
+      const indexFile = data.files?.find((f) => f.path.endsWith("index.html"));
       if (indexFile) {
         setPreviewHtml(indexFile.content);
+        setPreviewVersion((v) => v + 1);
+        setMobileTab("apercu");
         // Le site a changé : la version publiée n'est plus à jour.
         setPublished(null);
       }
@@ -142,7 +166,11 @@ export function ChatPanel() {
       const data = await res.json();
 
       if (!res.ok) {
-        setTurns((t) => [...t, { role: "assistant", text: data.error ?? "Échec de la publication." }]);
+        setTurns((t) => [
+          ...t,
+          { role: "assistant", text: data.error ?? "Échec de la publication." },
+        ]);
+        setMobileTab("conversation");
         return;
       }
 
@@ -156,50 +184,113 @@ export function ChatPanel() {
         ...t,
         { role: "assistant", text: "Publication impossible. Réessayez dans un instant." },
       ]);
+      setMobileTab("conversation");
     } finally {
       setPublishing(false);
     }
   }
 
-  return (
-    <div className="flex w-full max-w-5xl flex-col gap-6">
-      {turns.length > 0 && (
-        <div className="flex flex-col gap-4">
-          {turns.map((turn, i) => (
-            <div
-              key={i}
-              className={
-                turn.role === "user"
-                  ? "self-end max-w-[80%] rounded-2xl bg-accent px-4 py-2.5 text-sm text-white"
-                  : "self-start max-w-[80%] rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm text-text"
-              }
-            >
-              <p className="whitespace-pre-wrap leading-relaxed">{turn.text}</p>
-            </div>
-          ))}
-          {loading && (
-            <div className="flex items-center gap-2 self-start text-xs text-text-secondary">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              L&apos;agent conçoit votre site…
-            </div>
-          )}
-        </div>
-      )}
+  // Écran d'accueil : rien d'autre que l'invitation à décrire son site.
+  if (!started) {
+    return (
+      <div className="flex w-full flex-1 items-center justify-center px-4">
+        <SiteBuilderChat onSubmit={handleSubmit} disabled={loading} />
+      </div>
+    );
+  }
 
-      {previewHtml && (
-        <div className="w-full overflow-hidden rounded-2xl border border-border bg-surface">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+  return (
+    <div className="flex w-full flex-1 flex-col gap-3 overflow-hidden px-4 pb-4">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={startNewSite}
+          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Nouveau site
+        </button>
+
+        {/* Bascule mobile : les deux panneaux ne tiennent pas côte à côte. */}
+        <div className="flex rounded-lg border border-border p-0.5 lg:hidden">
+          <TabButton
+            active={mobileTab === "conversation"}
+            onClick={() => setMobileTab("conversation")}
+            icon={<MessageSquare className="h-3.5 w-3.5" />}
+            label="Discussion"
+          />
+          <TabButton
+            active={mobileTab === "apercu"}
+            onClick={() => setMobileTab("apercu")}
+            icon={<Monitor className="h-3.5 w-3.5" />}
+            label="Aperçu"
+          />
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 gap-4">
+        <section
+          className={cn(
+            "min-h-0 flex-col gap-3 lg:flex lg:w-[400px] lg:shrink-0",
+            mobileTab === "conversation" ? "flex flex-1" : "hidden",
+          )}
+        >
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-3">
+              {turns.map((turn, i) => (
+                <div
+                  key={i}
+                  className={
+                    turn.role === "user"
+                      ? "max-w-[85%] self-end rounded-2xl bg-accent px-4 py-2.5 text-sm text-white"
+                      : "max-w-[85%] self-start rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm text-text"
+                  }
+                >
+                  <p className="leading-relaxed whitespace-pre-wrap">{turn.text}</p>
+                </div>
+              ))}
+              {loading && (
+                <div className="flex items-center gap-2 self-start text-xs text-text-secondary">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  L&apos;agent travaille sur votre site…
+                </div>
+              )}
+              <div ref={turnsEndRef} />
+            </div>
+          </div>
+
+          <SiteBuilderChat onSubmit={handleSubmit} disabled={loading} compact />
+        </section>
+
+        <section
+          className={cn(
+            "min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface lg:flex",
+            mobileTab === "apercu" ? "flex" : "hidden",
+          )}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
             <span className="font-mono-ui text-xs text-text-secondary">
-              Aperçu — pas encore publié
+              {published ? "Aperçu — publié" : "Aperçu — pas encore publié"}
             </span>
             <div className="flex flex-wrap items-center gap-2">
+              {conversationId && previewHtml && (
+                <a
+                  href={`/apercu/${conversationId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-text transition-colors hover:border-accent"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Ouvrir en grand
+                </a>
+              )}
               {published && (
                 <>
                   <a
                     href={published.repoUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center gap-1.5 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-text hover:border-accent transition-colors"
+                    className="flex items-center gap-1.5 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-text transition-colors hover:border-accent"
                   >
                     <GitFork className="h-3.5 w-3.5" />
                     Code
@@ -208,7 +299,7 @@ export function ChatPanel() {
                     href={published.deployUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="flex items-center gap-1.5 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-text hover:border-accent transition-colors"
+                    className="flex items-center gap-1.5 rounded-lg border border-border-strong px-3 py-1.5 text-xs text-text transition-colors hover:border-accent"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                     Site en ligne
@@ -218,8 +309,8 @@ export function ChatPanel() {
               <button
                 type="button"
                 onClick={handlePublish}
-                disabled={publishing || loading}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent-hover disabled:opacity-60 transition-colors"
+                disabled={publishing || loading || !previewHtml}
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-60"
               >
                 {publishing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -230,20 +321,52 @@ export function ChatPanel() {
               </button>
             </div>
           </div>
-          <iframe
-            title="Aperçu du site"
-            srcDoc={previewHtml + PREVIEW_NAVIGATION_GUARD}
-            sandbox="allow-scripts"
-            className="h-[600px] w-full bg-white"
-          />
-        </div>
-      )}
 
-      <SiteBuilderChat
-        onSubmit={(value, files) => handleSubmit(value, files)}
-        disabled={loading}
-        hideTitle={turns.length > 0}
-      />
+          {previewHtml ? (
+            <iframe
+              // Remonter l'iframe à chaque version garantit un rendu propre,
+              // sans état JavaScript ni position de défilement hérités.
+              key={previewVersion}
+              title="Aperçu du site"
+              srcDoc={previewHtml + PREVIEW_NAVIGATION_GUARD}
+              sandbox="allow-scripts"
+              className="min-h-0 w-full flex-1 bg-white"
+            />
+          ) : (
+            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-text-secondary">
+              {loading
+                ? "L'agent dessine votre site…"
+                : "Votre site apparaîtra ici dès que l'agent l'aura construit."}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors",
+        active ? "bg-surface-2 text-text" : "text-text-secondary hover:text-text",
+      )}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
