@@ -4,9 +4,9 @@ import { decryptToken } from "@/lib/crypto";
 import { createGithubRepo, commitFiles } from "@/lib/tools/github";
 import { deployToVercel } from "@/lib/tools/vercel";
 
-// Publication seulement : aucun appel Claude ici, donc rapide et à l'abri du
-// plafond de 60s qui faisait échouer l'ancien flux tout-en-un.
-export const maxDuration = 60;
+// Publication seulement : aucun appel Claude ici, donc rapide. La marge sert
+// aux sites multi-fichiers, où GitHub et Vercel enchaînent plus de requêtes.
+export const maxDuration = 120;
 
 interface SiteFile {
   path: string;

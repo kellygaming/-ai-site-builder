@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { DESIGN_REFERENCE, FRONTEND_DESIGN_GUIDANCE } from "@/lib/design-reference";
+import { hasPexels, searchPhotos } from "@/lib/tools/pexels";
 import type { Json } from "@/lib/supabase/types";
 
-// Un seul appel Claude par tour désormais (plus de push GitHub ni de
-// déploiement dans ce chemin), mais générer une page complète reste long.
-export const maxDuration = 60;
+// Plan Vercel Pro : plafond de fonction à 300s (contre 60s en Hobby). C'est
+// ce budget qui permet de générer une page complète sans la tronquer.
+export const maxDuration = 300;
 
 /**
  * Une clé API "identity-linked" (liée à un utilisateur plutôt qu'à un
@@ -39,12 +40,21 @@ Règles :
   dans une iframe : des fichiers séparés ne se chargeraient pas). N'ajoute d'autres fichiers
   que si le client demande explicitement plusieurs pages.
 - Sur une demande de modification, renvoie l'index.html COMPLET modifié, pas un extrait.
-- CONTRAINTE DURE : le fichier doit rester compact (environ 200 lignes de HTML, 10 Ko max).
-  Le serveur coupe la génération au-delà. Une page courte, dense et finie vaut infiniment
-  mieux qu'une page ambitieuse tronquée en plein milieu. Concentre-toi sur 3-4 sections
-  essentielles, du CSS ramassé (variables, pas de répétitions), zéro commentaire.
+- Vise une page complète et finie : 4 à 6 sections réelles (hero, offre/services, preuve
+  sociale ou galerie, à-propos, contact). Termine toujours ce que tu commences — une page
+  tronquée en plein milieu ne vaut rien. Pas de commentaires dans le code, du CSS ramassé
+  (variables CSS, pas de répétitions).
 - Design soigné, moderne, responsive, en français, cohérent avec ce que le client décrit.
-- Pas de dépendances externes sauf polices Google Fonts si besoin.
+- Pas de bibliothèque JS ni de framework externe. Ressources externes autorisées : les
+  polices Google Fonts, et les photos renvoyées par l'outil search_photos.
+- PHOTOS : appelle search_photos AVANT de rédiger le site (une seule fois, avec toutes les
+  recherches dont tu as besoin) dès que le sujet gagne à être illustré — restaurant, hôtel,
+  salon, boutique, artisan, sport, immobilier, voyage... Requêtes en anglais, précises et
+  concrètes ("grilled steak dark plate" et non "food"). N'utilise QUE les URLs renvoyées :
+  n'invente jamais une adresse d'image, elle serait cassée. Chaque image porte un attribut
+  alt descriptif, l'attribut loading="lazy" sauf celle de la hero, et une hauteur/largeur maîtrisée
+  (object-fit: cover) pour éviter que la page saute au chargement. Si l'outil ne renvoie
+  rien, compose sans photo plutôt que d'inventer un lien.
 - Accompagne toujours ton appel d'outil d'une phrase courte en français : ce que tu as fait
   et ce que le client peut te demander d'ajuster.
 
@@ -79,6 +89,28 @@ const PREVIEW_TOOL: Anthropic.Tool = {
   },
 };
 
+const SEARCH_PHOTOS_TOOL: Anthropic.Tool = {
+  name: "search_photos",
+  description:
+    "Cherche des photos libres de droits (Pexels) à intégrer dans le site. Renvoie des URLs réelles et utilisables. Groupe toutes tes recherches en un seul appel.",
+  input_schema: {
+    type: "object",
+    properties: {
+      queries: {
+        type: "array",
+        description:
+          "Recherches en anglais, 1 à 5, précises et concrètes (ex: \"grilled steak dark plate\").",
+        items: { type: "string" },
+      },
+      per_query: {
+        type: "integer",
+        description: "Nombre de photos par recherche, 1 à 5. Défaut 3.",
+      },
+    },
+    required: ["queries"],
+  },
+};
+
 interface SiteFile {
   path: string;
   content: string;
@@ -103,6 +135,9 @@ function parseSiteFiles(raw: unknown): SiteFile[] | null {
   }
   return files;
 }
+
+/** Assez pour une recherche de photos puis la rédaction, sans boucle infinie. */
+const MAX_TOOL_ROUNDS = 3;
 
 const TRUNCATED_REPLY =
   "Le site que vous demandez est trop long : la génération a été coupée avant la fin, je préfère ne rien vous montrer d'incomplet. Redemandez-le en plus simple (3 sections maximum, par exemple « accueil, services, contact »), ou demandez-moi de le construire section par section — je commence par l'accueil et on ajoute le reste ensuite.";
@@ -205,39 +240,84 @@ export async function POST(request: Request) {
   await persist("user", userContent);
   const messages: Anthropic.MessageParam[] = [...history, { role: "user", content: userContent }];
 
-  // Contraintes de latence, pas de préférence esthétique : la fonction meurt à
-  // 60s (plafond du plan Hobby) et écrire du HTML est lent (~60-100 tokens/s).
-  // Raisonnement désactivé + effort bas + plafond de sortie serré = la seule
-  // façon de tenir. Sur un plan Vercel Pro (300s), on peut tout relâcher.
-  let response: Anthropic.Message;
-  try {
-    response = await client.messages.create({
-      model: "claude-sonnet-5",
-      max_tokens: 3500,
-      thinking: { type: "disabled" },
-      output_config: { effort: "low" },
-      system: BASE_SYSTEM_PROMPT,
-      tools: [PREVIEW_TOOL],
-      messages,
-    });
-  } catch (error) {
-    // Sans ce filet, une erreur de l'API remonte en 500 sans corps JSON : le
-    // client affichait alors "Connexion impossible", message trompeur qui
-    // masquait la vraie cause. On renvoie une erreur lisible et traçable.
-    console.error("[chat] appel Anthropic échoué", error);
-    return NextResponse.json(
-      {
-        conversationId,
-        error:
-          "L'agent n'a pas pu répondre (service de génération indisponible). Réessayez dans un instant.",
-      },
-      { status: 502 },
+  // search_photos n'est proposé que si la clé Pexels est configurée : sans elle
+  // l'agent ne peut pas chercher d'images, mais il génère toujours le site.
+  const tools = hasPexels() ? [SEARCH_PHOTOS_TOOL, PREVIEW_TOOL] : [PREVIEW_TOOL];
+
+  // Boucle d'outils : l'agent peut chercher ses photos puis rédiger le site
+  // dans le même tour. La borne évite qu'il boucle indéfiniment sur des
+  // recherches sans jamais livrer de page.
+  let response!: Anthropic.Message;
+  let text: Anthropic.TextBlock | undefined;
+  let toolUse: Anthropic.ToolUseBlock | undefined;
+
+  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Le plan Pro (300s) laisse enfin la place de générer une page entière :
+    // plus de raisonnement désactivé ni d'effort bridé, c'était uniquement pour
+    // tenir dans les 60s du plan Hobby et ça coûtait cher en qualité de design.
+    try {
+      response = await client.messages.create({
+        model: "claude-sonnet-5",
+        max_tokens: 16000,
+        system: BASE_SYSTEM_PROMPT,
+        tools,
+        messages,
+      });
+    } catch (error) {
+      // Sans ce filet, une erreur de l'API remonte en 500 sans corps JSON : le
+      // client affichait alors "Connexion impossible", message trompeur qui
+      // masquait la vraie cause. On renvoie une erreur lisible et traçable.
+      console.error("[chat] appel Anthropic échoué", error);
+      return NextResponse.json(
+        {
+          conversationId,
+          error:
+            "L'agent n'a pas pu répondre (service de génération indisponible). Réessayez dans un instant.",
+        },
+        { status: 502 },
+      );
+    }
+
+    text = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+    toolUse = response.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "preview_site",
     );
+    if (toolUse) break;
+
+    const photoCalls = response.content.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "search_photos",
+    );
+    // Ni site, ni recherche : c'est une réponse purement conversationnelle.
+    if (photoCalls.length === 0) break;
+
+    await persist("assistant", response.content);
+    messages.push({ role: "assistant", content: response.content });
+
+    const results = await Promise.all(
+      photoCalls.map(async (call) => {
+        const args = call.input as { queries?: unknown; per_query?: unknown };
+        const queries = Array.isArray(args.queries)
+          ? args.queries.filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+          : [];
+        const perQuery =
+          typeof args.per_query === "number" ? Math.min(Math.max(args.per_query, 1), 5) : 3;
+
+        const photos = Object.fromEntries(
+          await Promise.all(
+            queries.slice(0, 5).map(async (q) => [q, await searchPhotos(q, perQuery)] as const),
+          ),
+        );
+        return {
+          type: "tool_result" as const,
+          tool_use_id: call.id,
+          content: JSON.stringify(photos),
+        };
+      }),
+    );
+
+    await persist("user", results);
+    messages.push({ role: "user", content: results });
   }
-  const text = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
-  const toolUse = response.content.find(
-    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
-  );
 
   // stop_reason "max_tokens" = la réponse a été coupée net. Si elle contenait un
   // appel d'outil, son JSON est forcément incomplet (même quand il se trouve
