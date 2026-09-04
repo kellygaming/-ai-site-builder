@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, GitFork, Loader2, MessageSquare, Monitor, Plus, Rocket } from "lucide-react";
 import { SiteBuilderChat } from "@/components/ui/chat-input";
 import { cn } from "@/lib/utils";
@@ -21,15 +21,25 @@ const MAX_TEXT_FILE_BYTES = 200_000;
 /**
  * L'aperçu est rendu via srcDoc : l'iframe n'a pas d'URL propre, donc un lien
  * relatif du site généré ("/reserver") se résout contre NOTRE domaine. Cliquer
- * dessus faisait naviguer l'iframe vers l'application et remplaçait l'aperçu
- * par notre page de connexion. On neutralise donc toute navigation à
- * l'intérieur de l'aperçu, en laissant vivre les ancres internes (#contact)
- * pour que le défilement et le menu du site restent démontrables au client.
+ * dessus faisait naviguer l'iframe vers l'application, et le client voyait
+ * notre page d'accueil à la place de son site.
+ *
+ * Ce script est la deuxième barrière (la première neutralise les attributs
+ * href, voir buildPreviewDocument) : il couvre les liens ajoutés par le
+ * JavaScript du site après coup. Il remonte les parents à la main plutôt que
+ * d'utiliser closest(), absent des éléments SVG sur certains navigateurs — un
+ * lien habillé d'une icône SVG serait alors passé au travers.
  */
-const PREVIEW_NAVIGATION_GUARD = `<script>
-(function () {
+const PREVIEW_NAVIGATION_GUARD = `(function () {
+  function findLink(node) {
+    while (node) {
+      if (node.tagName && String(node.tagName).toLowerCase() === "a") return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
   document.addEventListener("click", function (event) {
-    var link = event.target && event.target.closest && event.target.closest("a");
+    var link = findLink(event.target);
     if (!link) return;
     var href = link.getAttribute("href") || "";
     if (href.charAt(0) === "#") return;
@@ -38,8 +48,57 @@ const PREVIEW_NAVIGATION_GUARD = `<script>
   document.addEventListener("submit", function (event) {
     event.preventDefault();
   }, true);
-})();
-</script>`;
+})();`;
+
+/**
+ * Première barrière : on réécrit le document avant de l'injecter. Tout lien qui
+ * n'est pas une ancre interne devient inerte, et les formulaires perdent leur
+ * destination. C'est déterministe — contrairement à un gestionnaire
+ * d'événements, ça ne dépend ni du navigateur ni de l'ordre d'exécution.
+ */
+function buildPreviewDocument(html: string): string {
+  const fallback = `${html}<script>${PREVIEW_NAVIGATION_GUARD}<\/script>`;
+  if (typeof window === "undefined") return fallback;
+
+  try {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    if (!doc.body) return fallback;
+
+    for (const link of Array.from(doc.querySelectorAll("a[href]"))) {
+      const href = link.getAttribute("href") ?? "";
+      if (!href.startsWith("#")) link.setAttribute("href", "#");
+      link.removeAttribute("target");
+    }
+    for (const form of Array.from(doc.querySelectorAll("form"))) {
+      form.removeAttribute("action");
+      form.removeAttribute("target");
+    }
+
+    const guard = doc.createElement("script");
+    guard.textContent = PREVIEW_NAVIGATION_GUARD;
+    doc.body.appendChild(guard);
+
+    return `<!doctype html>${doc.documentElement.outerHTML}`;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * L'onglet d'un client peut être déchargé à tout moment (bascule d'application
+ * sur mobile, rechargement) : sans cette clé, il retrouvait l'écran d'accueil
+ * et croyait son site perdu.
+ */
+const ACTIVE_CONVERSATION_KEY = "ai-site-builder:conversation";
+
+function rememberConversation(id: string | null) {
+  try {
+    if (id) localStorage.setItem(ACTIVE_CONVERSATION_KEY, id);
+    else localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+  } catch {
+    // Navigation privée ou stockage refusé : on continue sans mémoire.
+  }
+}
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -60,9 +119,72 @@ export function ChatPanel() {
   const [published, setPublished] = useState<{ repoUrl: string; deployUrl: string } | null>(null);
   // Sur mobile les deux panneaux ne tiennent pas côte à côte : on bascule.
   const [mobileTab, setMobileTab] = useState<"conversation" | "apercu">("conversation");
+  const [restoring, setRestoring] = useState(true);
+  // Incrémenté quand l'iframe a quand même réussi à naviguer : force un
+  // remontage sur le HTML d'origine plutôt que de laisser le client devant une
+  // page qui n'est pas son site.
+  const [frameNonce, setFrameNonce] = useState(0);
 
   const turnsEndRef = useRef<HTMLDivElement>(null);
+  const frameLoadsRef = useRef(0);
   const started = turns.length > 0;
+
+  const previewDocument = useMemo(
+    () => (previewHtml ? buildPreviewDocument(previewHtml) : null),
+    [previewHtml],
+  );
+
+  // Restaure la conversation en cours au chargement de la page. Sans ça, un
+  // client qui bascule sur une autre application et revient perd tout.
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      let stored: string | null = null;
+      try {
+        stored = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+      } catch {
+        stored = null;
+      }
+
+      if (!stored) {
+        if (!cancelled) setRestoring(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/conversations/${stored}`);
+        if (!res.ok) {
+          // Conversation supprimée ou session expirée : on repart proprement.
+          if (res.status === 404) rememberConversation(null);
+          return;
+        }
+        const data: { conversationId: string; turns: Turn[]; files: SiteFile[] } = await res.json();
+        if (cancelled) return;
+
+        setConversationId(data.conversationId);
+        setTurns(data.turns);
+        const index = data.files.find((file) => file.path.endsWith("index.html"));
+        if (index) {
+          setPreviewHtml(index.content);
+          setPreviewVersion((v) => v + 1);
+        }
+      } catch {
+        // Hors ligne : on laisse l'écran d'accueil plutôt que de bloquer.
+      } finally {
+        if (!cancelled) setRestoring(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Chaque nouvelle version repart d'un compteur neuf de chargements d'iframe.
+  useEffect(() => {
+    frameLoadsRef.current = 0;
+  }, [previewVersion, frameNonce]);
 
   // Le dernier message doit rester visible sans que le client ait à faire
   // défiler lui-même — sinon la réponse de l'agent passe inaperçue.
@@ -71,6 +193,7 @@ export function ChatPanel() {
   }, [turns, loading]);
 
   function startNewSite() {
+    rememberConversation(null);
     setTurns([]);
     setConversationId(null);
     setPreviewHtml(null);
@@ -124,7 +247,10 @@ export function ChatPanel() {
         return;
       }
 
-      if (data.conversationId) setConversationId(data.conversationId);
+      if (data.conversationId) {
+        setConversationId(data.conversationId);
+        rememberConversation(data.conversationId);
+      }
 
       if (!res.ok) {
         setTurns((t) => [
@@ -188,6 +314,17 @@ export function ChatPanel() {
     } finally {
       setPublishing(false);
     }
+  }
+
+  // Pendant la restauration, surtout ne pas afficher "Quel site voulez-vous
+  // créer ?" : le client croirait son travail perdu.
+  if (restoring && !started) {
+    return (
+      <div className="flex w-full flex-1 items-center justify-center gap-2 text-sm text-text-secondary">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Chargement de votre site…
+      </div>
+    );
   }
 
   // Écran d'accueil : rien d'autre que l'invitation à décrire son site.
@@ -322,15 +459,22 @@ export function ChatPanel() {
             </div>
           </div>
 
-          {previewHtml ? (
+          {previewDocument ? (
             <iframe
               // Remonter l'iframe à chaque version garantit un rendu propre,
               // sans état JavaScript ni position de défilement hérités.
-              key={previewVersion}
+              key={`${previewVersion}-${frameNonce}`}
               title="Aperçu du site"
-              srcDoc={previewHtml + PREVIEW_NAVIGATION_GUARD}
+              srcDoc={previewDocument}
               sandbox="allow-scripts"
               className="min-h-0 w-full flex-1 bg-white"
+              onLoad={() => {
+                // Troisième barrière. Le premier chargement est notre document ;
+                // un second signifie que l'iframe a navigué malgré tout, et on
+                // la ramène immédiatement sur le site du client.
+                frameLoadsRef.current += 1;
+                if (frameLoadsRef.current > 1) setFrameNonce((nonce) => nonce + 1);
+              }}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-text-secondary">
