@@ -17,6 +17,29 @@ interface Turn {
 const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const MAX_TEXT_FILE_BYTES = 200_000;
 
+/**
+ * L'aperçu est rendu via srcDoc : l'iframe n'a pas d'URL propre, donc un lien
+ * relatif du site généré ("/reserver") se résout contre NOTRE domaine. Cliquer
+ * dessus faisait naviguer l'iframe vers l'application et remplaçait l'aperçu
+ * par notre page de connexion. On neutralise donc toute navigation à
+ * l'intérieur de l'aperçu, en laissant vivre les ancres internes (#contact)
+ * pour que le défilement et le menu du site restent démontrables au client.
+ */
+const PREVIEW_NAVIGATION_GUARD = `<script>
+(function () {
+  document.addEventListener("click", function (event) {
+    var link = event.target && event.target.closest && event.target.closest("a");
+    if (!link) return;
+    var href = link.getAttribute("href") || "";
+    if (href.charAt(0) === "#") return;
+    event.preventDefault();
+  }, true);
+  document.addEventListener("submit", function (event) {
+    event.preventDefault();
+  }, true);
+})();
+</script>`;
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -209,7 +232,7 @@ export function ChatPanel() {
           </div>
           <iframe
             title="Aperçu du site"
-            srcDoc={previewHtml}
+            srcDoc={previewHtml + PREVIEW_NAVIGATION_GUARD}
             sandbox="allow-scripts"
             className="h-[600px] w-full bg-white"
           />

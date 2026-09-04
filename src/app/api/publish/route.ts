@@ -108,9 +108,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ repoUrl, deployUrl: deployment.url });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Échec de la publication." },
-      { status: 500 },
-    );
+    // Le détail technique va dans les logs ; le client, lui, reçoit une phrase
+    // qu'il peut comprendre et sur laquelle il peut agir. Renvoyer le corps
+    // brut de l'API GitHub dans le chat n'aide personne.
+    console.error("[publish] échec", error);
+    const detail = error instanceof Error ? error.message : "";
+    const message = detail.includes("401") || detail.includes("403")
+      ? "Votre connexion GitHub ou Vercel a expiré. Reconnectez-la depuis les bandeaux en haut de la page, puis réessayez."
+      : "La publication a échoué. Réessayez dans un instant — si le problème persiste, dites-le moi et je regarde.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

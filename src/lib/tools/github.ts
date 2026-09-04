@@ -31,17 +31,39 @@ async function githubFetch(token: string, path: string, init?: RequestInit) {
   return response.json();
 }
 
-/** Crée un repo privé sous le compte GitHub du client connecté. */
+/**
+ * Crée un repo privé sous le compte GitHub du client connecté.
+ *
+ * auto_init crée un commit initial (un README). Ce n'est pas cosmétique :
+ * l'API Git Data refuse d'écrire le moindre blob dans un dépôt sans aucun
+ * commit et répond 409 "Git Repository is empty".
+ */
 export async function createGithubRepo(
   token: string,
   name: string,
   description: string,
 ): Promise<CreateRepoResult> {
-  const data = await githubFetch(token, "/user/repos", {
+  const response = await fetch(`${API}/user/repos`, {
     method: "POST",
-    body: JSON.stringify({ name, description, private: true, auto_init: false }),
+    headers: headers(token),
+    body: JSON.stringify({ name, description, private: true, auto_init: true }),
   });
-  return { owner: data.owner.login, repo: data.name, htmlUrl: data.html_url };
+
+  if (response.ok) {
+    const data = await response.json();
+    return { owner: data.owner.login, repo: data.name, htmlUrl: data.html_url };
+  }
+
+  // 422 = le nom est déjà pris. C'est le cas quand une publication précédente
+  // a créé le dépôt puis échoué plus loin : on le réutilise au lieu de bloquer
+  // le client sur un dépôt fantôme qu'il devrait supprimer à la main.
+  if (response.status === 422) {
+    const me = await githubFetch(token, "/user");
+    const existing = await githubFetch(token, `/repos/${me.login}/${name}`);
+    return { owner: existing.owner.login, repo: existing.name, htmlUrl: existing.html_url };
+  }
+
+  throw new Error(`GitHub POST /user/repos → ${response.status} : ${await response.text()}`);
 }
 
 /**
@@ -62,15 +84,35 @@ export async function commitFiles(
 ): Promise<void> {
   const base = `/repos/${owner}/${repo}`;
 
-  // Un repo fraîchement créé (auto_init: false) n'a aucune ref : premier commit sans parent.
   let parentCommitSha: string | null = null;
   let baseTreeSha: string | null = null;
 
-  const refResponse = await fetch(`${API}${base}/git/ref/heads/${BRANCH}`, {
-    headers: headers(token),
-  });
-  if (refResponse.ok) {
-    const ref = await refResponse.json();
+  const readHead = async () => {
+    const response = await fetch(`${API}${base}/git/ref/heads/${BRANCH}`, {
+      headers: headers(token),
+    });
+    return response.ok ? await response.json() : null;
+  };
+
+  let ref = await readHead();
+
+  // Dépôt sans aucun commit (créé avant auto_init, ou branche par défaut
+  // différente) : l'API Git Data y répond 409. L'API Contents, elle, accepte
+  // d'écrire dans le vide — on l'utilise juste pour poser le commit initial,
+  // puis on repasse sur Git Data pour le vrai commit en une seule requête.
+  if (!ref) {
+    await githubFetch(token, `${base}/contents/README.md`, {
+      method: "PUT",
+      body: JSON.stringify({
+        message: "Initialise le dépôt",
+        content: Buffer.from("# Site créé avec AI Site Builder\n", "utf-8").toString("base64"),
+        branch: BRANCH,
+      }),
+    });
+    ref = await readHead();
+  }
+
+  if (ref) {
     parentCommitSha = ref.object.sha;
     const commit = await githubFetch(token, `${base}/git/commits/${parentCommitSha}`);
     baseTreeSha = commit.tree.sha;
