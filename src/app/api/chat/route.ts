@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { DESIGN_REFERENCE, FRONTEND_DESIGN_GUIDANCE } from "@/lib/design-reference";
 import { hasPexels, searchPhotos } from "@/lib/tools/pexels";
+import { uploadClientImage } from "@/lib/tools/storage";
 import type { Json } from "@/lib/supabase/types";
 
 // Plan Vercel Pro : plafond de fonction à 300s (contre 60s en Hobby). C'est
@@ -42,7 +43,8 @@ DÉROULÉ DE LA CONVERSATION
    arrête-toi et attends la réponse. N'appelle aucun outil dans ce message.
 
    Choisis les 4 questions les plus utiles pour CE projet parmi :
-   - Avez-vous un logo ? (précise qu'il suffit de le joindre avec le trombone)
+   - Avez-vous un logo ? (précise qu'il suffit de le joindre avec le trombone, et qu'il
+     sera intégré directement sur le site)
    - Avez-vous des photos à intégrer ? (sinon tu en choisis toi-même, dis-le)
    - Une préférence de couleurs, ou vous partez sur celles de votre logo ?
    - Par où doit-on vous contacter : WhatsApp, téléphone, e-mail ?
@@ -69,11 +71,11 @@ DÉROULÉ DE LA CONVERSATION
    plus ensuite.
 
 Règles :
-- Si le client fournit un logo, sers-t'en pour la charte : reprends ses couleurs dominantes
-  dans la palette du site et le nom de la marque en typographie. N'écris jamais de balise
-  <img> pointant vers ce logo, tu n'as pas d'adresse pour ce fichier — l'image serait
-  cassée. Dis simplement au client que vous intégrerez le fichier du logo à la mise en
-  ligne.
+- Chaque image envoyée par le client est suivie de son adresse web. Utilise CETTE adresse,
+  telle quelle, pour l'afficher dans le site. Un logo va dans l'en-tête (hauteur fixe,
+  largeur automatique, attribut alt avec le nom de la marque), et ses couleurs dominantes
+  deviennent la palette du site. Une photo de produit ou de lieu va dans la section qui lui
+  correspond. N'invente jamais d'adresse : n'utilise que celles qu'on t'a données.
 - Si le client joint une image, c'est une référence visuelle directe (site à reproduire,
   design qu'il aime, logo, charte de couleurs...) — ancre ta conception dessus.
 - Si le client joint du code existant, pars de ce code pour l'améliorer plutôt que de tout
@@ -267,6 +269,10 @@ export async function POST(request: Request) {
       text: `Fichier joint "${file.name}" :\n\`\`\`\n${file.content}\n\`\`\``,
     });
   }
+  // Chaque image est jointe deux fois : en base64 pour que le modèle la VOIE,
+  // et sous forme d'URL publique pour qu'il puisse l'AFFICHER sur le site. Sans
+  // l'URL, un logo restait un simple sujet de conversation, jamais un élément
+  // de la page.
   for (const image of images ?? []) {
     userContent.push({
       type: "image",
@@ -276,6 +282,14 @@ export async function POST(request: Request) {
         data: image.data,
       },
     });
+
+    const url = await uploadClientImage(user.id, image.mediaType, image.data);
+    if (url) {
+      userContent.push({
+        type: "text",
+        text: `Adresse de l'image ci-dessus, utilisable telle quelle dans le site : ${url}`,
+      });
+    }
   }
   if (userContent.length === 0) userContent.push({ type: "text", text: "(message vide)" });
 

@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { decryptToken } from "@/lib/crypto";
 import { createGithubRepo, commitFiles } from "@/lib/tools/github";
 import { deployToVercel } from "@/lib/tools/vercel";
+import { assetRepoPath, findStoredAssetUrls } from "@/lib/tools/storage";
 
 // Publication seulement : aucun appel Claude ici, donc rapide. La marge sert
 // aux sites multi-fichiers, où GitHub et Vercel enchaînent plus de requêtes.
@@ -11,6 +12,56 @@ export const maxDuration = 120;
 interface SiteFile {
   path: string;
   content: string;
+  /** "base64" pour un binaire (logo, photo) ; absent pour du texte. */
+  encoding?: "base64";
+}
+
+/**
+ * Rapatrie les images hébergées chez nous dans le dépôt du client et remplace
+ * leurs adresses par des chemins relatifs.
+ *
+ * Sans cette étape, le site publié resterait accroché à notre stockage : nous
+ * paierions sa bande passante à vie, et le jour où le client part — ou bien où
+ * ce projet s'arrête — son logo disparaîtrait de son propre site. Après
+ * recopie, le site qu'il possède est autonome.
+ */
+async function inlineStoredAssets(files: SiteFile[]): Promise<SiteFile[]> {
+  const urls = Array.from(new Set(files.flatMap((file) => findStoredAssetUrls(file.content))));
+  if (urls.length === 0) return files;
+
+  const downloaded = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        const buffer = Buffer.from(await response.arrayBuffer());
+        return {
+          url,
+          file: {
+            path: assetRepoPath(url),
+            content: buffer.toString("base64"),
+            encoding: "base64" as const,
+          },
+        };
+      } catch (error) {
+        console.error(`[publish] asset non rapatrié : ${url}`, error);
+        return null;
+      }
+    }),
+  );
+
+  const assets = downloaded.filter((entry) => entry !== null);
+  if (assets.length === 0) return files;
+
+  const rewritten = files.map((file) => ({
+    ...file,
+    content: assets.reduce(
+      (content, asset) => content.split(asset.url).join(asset.file.path),
+      file.content,
+    ),
+  }));
+
+  return [...rewritten, ...assets.map((asset) => asset.file)];
 }
 
 export async function POST(request: Request) {
@@ -70,6 +121,10 @@ export async function POST(request: Request) {
     );
   }
 
+  // Les images du client rejoignent son dépôt avant tout envoi, pour que son
+  // site ne dépende plus de notre stockage une fois en ligne.
+  const publishableFiles = await inlineStoredAssets(files);
+
   const githubToken = decryptToken(githubConn.access_token_encrypted);
   const vercelToken = decryptToken(vercelConn.access_token_encrypted);
   const projectName = conversation.vercel_project_name ?? `site-${conversationId.slice(0, 8)}`;
@@ -92,13 +147,13 @@ export async function POST(request: Request) {
       repoUrl = created.htmlUrl;
     }
 
-    await commitFiles(githubToken, owner, repo, files, "Publie le site");
+    await commitFiles(githubToken, owner, repo, publishableFiles, "Publie le site");
 
     const deployment = await deployToVercel(
       vercelToken,
       vercelConn.vercel_team_id,
       projectName,
-      files,
+      publishableFiles,
     );
 
     await supabase

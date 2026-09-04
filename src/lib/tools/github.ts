@@ -9,6 +9,8 @@ interface CreateRepoResult {
 interface SiteFile {
   path: string;
   content: string;
+  /** "base64" pour un binaire (logo, photo) ; absent pour du texte. */
+  encoding?: "base64";
 }
 
 const API = "https://api.github.com";
@@ -123,7 +125,12 @@ export async function commitFiles(
       const blob = await githubFetch(token, `${base}/git/blobs`, {
         method: "POST",
         body: JSON.stringify({
-          content: Buffer.from(file.content, "utf-8").toString("base64"),
+          // Un binaire arrive déjà en base64 ; le repasser par un décodage
+          // utf-8 corromprait l'image.
+          content:
+            file.encoding === "base64"
+              ? file.content
+              : Buffer.from(file.content, "utf-8").toString("base64"),
           encoding: "base64",
         }),
       });

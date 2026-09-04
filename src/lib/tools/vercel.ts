@@ -3,6 +3,8 @@ import "server-only";
 interface SiteFile {
   path: string;
   content: string;
+  /** "base64" pour un binaire (logo, photo) ; absent pour du texte. */
+  encoding?: "base64";
 }
 
 interface DeployResult {
@@ -33,7 +35,11 @@ export async function deployToVercel(
     body: JSON.stringify({
       name: projectName,
       target: "production",
-      files: files.map((f) => ({ file: f.path, data: f.content })),
+      files: files.map((f) => ({
+        file: f.path,
+        data: f.content,
+        ...(f.encoding ? { encoding: f.encoding } : {}),
+      })),
       projectSettings: { framework: null },
     }),
   });
