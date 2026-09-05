@@ -343,12 +343,15 @@ export async function POST(request: Request) {
   let toolUse: Anthropic.ToolUseBlock | undefined;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    // Le plan Pro (300s) laisse enfin la place de générer une page entière :
-    // plus de raisonnement désactivé ni d'effort bridé, c'était uniquement pour
-    // tenir dans les 60s du plan Hobby et ça coûtait cher en qualité de design.
+    // Concevoir un site est la tâche où l'écart entre modèles se voit le plus :
+    // composition, hiérarchie typographique, choix qui sortent de l'ordinaire.
+    // Sonnet était un choix de latence imposé par les 60s du plan Hobby, pas un
+    // choix de qualité — sur Pro, la génération passe sur le modèle le plus
+    // capable. Le raisonnement est actif par défaut sur Opus 5 : on ne le
+    // configure pas, c'est justement ce qu'on veut ici.
     try {
       response = await client.messages.create({
-        model: "claude-sonnet-5",
+        model: "claude-opus-5",
         max_tokens: 16000,
         // Le prompt système (règles + guide de design + palettes) est
         // volumineux et strictement identique à chaque tour : mis en cache, il
@@ -377,6 +380,16 @@ export async function POST(request: Request) {
         },
         { status: 502 },
       );
+    }
+
+    // Un classificateur de sécurité peut décliner une demande : la réponse
+    // arrive en 200 avec stop_reason "refusal" et un contenu vide. Sans ce
+    // filet le client verrait un aperçu blanc sans explication.
+    if (response.stop_reason === "refusal") {
+      const refusal =
+        "Je ne peux pas construire ce site en l'état. Reformulez votre demande, ou dites-moi autrement ce que propose votre activité.";
+      await persist("assistant", [{ type: "text", text: refusal }]);
+      return NextResponse.json({ conversationId, reply: refusal });
     }
 
     text = response.content.find((b): b is Anthropic.TextBlock => b.type === "text");
@@ -515,6 +528,9 @@ export async function POST(request: Request) {
 
     let second: Anthropic.Message;
     try {
+      // La relecture ne conçoit rien : elle regarde deux captures, lit des
+      // constats mesurés et corrige. C'est de l'exécution, Sonnet la fait très
+      // bien — inutile de doubler la facture du tour de vérification.
       second = await client.messages.create({
         model: "claude-sonnet-5",
         max_tokens: 16000,
