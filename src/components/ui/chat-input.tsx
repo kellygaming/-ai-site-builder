@@ -95,7 +95,11 @@ export function SiteBuilderChat({ onSubmit, disabled, compact }: SiteBuilderChat
 
   const addFiles = (list: FileList | null) => {
     if (!list || list.length === 0) return;
-    setFiles((prev) => [...prev, ...Array.from(list)]);
+    // Copie immédiate : l'appelant remet l'input à zéro juste après, ce qui
+    // vide la FileList. Lue paresseusement dans la fonction de mise à jour,
+    // elle serait déjà vide et les fichiers seraient perdus en silence.
+    const selected = Array.from(list);
+    setFiles((prev) => [...prev, ...selected]);
   };
 
   const removeFile = (index: number) => {

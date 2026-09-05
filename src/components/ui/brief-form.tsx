@@ -233,8 +233,12 @@ export function BriefForm({ onSubmit, onSkip, disabled }: BriefFormProps) {
                 multiple
                 hidden
                 onChange={(event) => {
-                  setPhotos((current) => [...current, ...Array.from(event.target.files ?? [])]);
+                  // La liste est copiée AVANT la remise à zéro de l'input :
+                  // React n'exécute la fonction de mise à jour qu'au rendu
+                  // suivant, quand event.target.files a déjà été vidé.
+                  const selected = Array.from(event.target.files ?? []);
                   event.target.value = "";
+                  setPhotos((current) => [...current, ...selected]);
                 }}
               />
               <div className="flex flex-col gap-2">
