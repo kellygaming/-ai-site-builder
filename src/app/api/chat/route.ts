@@ -100,6 +100,14 @@ Règles :
   la séquence que produisent tous les générateurs, et elle se reconnaît au premier coup
   d'œil. Termine toujours ce que tu commences — une page tronquée en plein milieu ne vaut
   rien. Pas de commentaires dans le code, du CSS ramassé (variables CSS, pas de répétitions).
+- DEMANDE TROP AMBITIEUSE pour une seule page (beaucoup de sections, plusieurs pages, un
+  catalogue entier) : ne refuse JAMAIS et ne rogne pas partout. Construis d'abord le cœur
+  du site — l'en-tête, la bannière et les 2 ou 3 sections les plus importantes, entièrement
+  finies et soignées — montre-le, puis dis en une phrase ce que tu ajoutes ensuite : "voici
+  déjà l'accueil et la carte, dites-moi et j'enchaîne avec la galerie et le contact".
+  Le client voit son site vivre tout de suite et vous le complétez ensemble. Une page
+  partielle mais finie vaut infiniment mieux qu'un refus ou qu'une page bâclée sur toute
+  sa longueur.
 - Design soigné, moderne, responsive, en français, cohérent avec ce que le client décrit.
 - Pas de bibliothèque JS ni de framework externe. Ressources externes autorisées : les
   polices Google Fonts, et les photos renvoyées par l'outil search_photos.
@@ -217,7 +225,7 @@ function parseSiteFiles(raw: unknown): SiteFile[] | null {
 const MAX_TOOL_ROUNDS = 3;
 
 const TRUNCATED_REPLY =
-  "Le site que vous demandez est trop long : la génération a été coupée avant la fin, je préfère ne rien vous montrer d'incomplet. Redemandez-le en plus simple (3 sections maximum, par exemple « accueil, services, contact »), ou demandez-moi de le construire section par section — je commence par l'accueil et on ajoute le reste ensuite.";
+  "Votre projet est riche — trop pour que je le construise d'un seul tenant sans risquer de vous livrer une page inachevée. Répondez-moi simplement « commence par l'accueil » et je vous montre tout de suite l'en-tête et les deux sections principales, entièrement finies. On ajoute le reste ensemble juste après, section par section.";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -350,9 +358,13 @@ export async function POST(request: Request) {
     // capable. Le raisonnement est actif par défaut sur Opus 5 : on ne le
     // configure pas, c'est justement ce qu'on veut ici.
     try {
-      response = await client.messages.create({
+      // En streaming, et pas pour afficher au fil de l'eau : au-delà d'environ
+      // 16 000 tokens de sortie, une requête classique dépasse le délai HTTP du
+      // SDK avant même d'avoir fini. Le streaming lève ce plafond, ce qui
+      // permet de doubler la place accordée à la page.
+      const stream = client.messages.stream({
         model: "claude-opus-5",
-        max_tokens: 16000,
+        max_tokens: 32000,
         // Le prompt système (règles + guide de design + palettes) est
         // volumineux et strictement identique à chaque tour : mis en cache, il
         // est facturé ~10 % sur toutes les relectures des 5 minutes suivantes.
@@ -367,6 +379,7 @@ export async function POST(request: Request) {
         tools,
         messages,
       });
+      response = await stream.finalMessage();
     } catch (error) {
       // Sans ce filet, une erreur de l'API remonte en 500 sans corps JSON : le
       // client affichait alors "Connexion impossible", message trompeur qui
@@ -531,15 +544,16 @@ export async function POST(request: Request) {
       // La relecture ne conçoit rien : elle regarde deux captures, lit des
       // constats mesurés et corrige. C'est de l'exécution, Sonnet la fait très
       // bien — inutile de doubler la facture du tour de vérification.
-      second = await client.messages.create({
+      const revisionStream = client.messages.stream({
         model: "claude-sonnet-5",
-        max_tokens: 16000,
+        max_tokens: 32000,
         system: [
           { type: "text", text: BASE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
         ],
         tools,
         messages,
       });
+      second = await revisionStream.finalMessage();
     } catch (error) {
       // La relecture est un bonus : en cas d'échec on livre la première
       // version. Retour non nul car le tool_use a déjà été refermé par le
