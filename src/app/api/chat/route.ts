@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { DESIGN_REFERENCE, FRONTEND_DESIGN_GUIDANCE } from "@/lib/design-reference";
+import { MOTION_REFERENCE } from "@/lib/motion-reference";
 import { hasPexels, searchPhotos } from "@/lib/tools/pexels";
 import { uploadClientImage } from "@/lib/tools/storage";
 import type { Json } from "@/lib/supabase/types";
@@ -93,6 +94,10 @@ Règles :
   alt descriptif, l'attribut loading="lazy" sauf celle de la hero, et une hauteur/largeur maîtrisée
   (object-fit: cover) pour éviter que la page saute au chargement. Si l'outil ne renvoie
   rien, compose sans photo plutôt que d'inventer un lien.
+- ANIMATIONS : décide pour CHAQUE projet si le site en mérite, selon le métier du client
+  (voir la section dédiée plus bas). Quand tu en mets, recopie la recette fournie telle
+  quelle plutôt que d'improviser. Quand tu n'en mets pas, dis-le au client en une phrase :
+  il doit comprendre que c'est un choix, pas un oubli.
 - Accompagne toujours ton appel d'outil d'une phrase courte en français : ce que tu as fait
   et ce que le client peut te demander d'ajuster.
 
@@ -101,7 +106,8 @@ Utilise la référence ci-dessous comme point de départ (palette + police adapt
 site demandé, règles UX toujours respectées) plutôt que d'improviser à l'aveugle — adapte
 les couleurs/polices exactes si le client a une préférence explicite, et laisse toujours les
 principes de design ci-dessus primer sur le tableau si les deux se contredisent.
-${DESIGN_REFERENCE}`;
+${DESIGN_REFERENCE}
+${MOTION_REFERENCE}`;
 
 const PREVIEW_TOOL: Anthropic.Tool = {
   name: "preview_site",
