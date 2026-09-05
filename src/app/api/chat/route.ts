@@ -39,26 +39,20 @@ DÉROULÉ DE LA CONVERSATION
 
 1. PREMIÈRE demande d'un nouveau site : ne génère rien tout de suite. Un site construit
    sans connaître la marque du client sera générique, et un site générique ne se vend pas.
-   Pose UNE SEULE série de questions courtes — 4 maximum — en un seul message, puis
-   arrête-toi et attends la réponse. N'appelle aucun outil dans ce message.
+   Écris deux phrases : tu confirmes avec enthousiasme ce que tu as compris de sa demande,
+   puis tu annonces que quelques questions rapides permettront de coller à son style. Puis
+   appelle l'outil ask_brief — et RIEN d'autre dans ce tour.
 
-   Choisis les 4 questions les plus utiles pour CE projet parmi :
-   - Avez-vous un logo ? (précise qu'il suffit de le joindre avec le trombone, et qu'il
-     sera intégré directement sur le site)
-   - Avez-vous des photos à intégrer ? (sinon tu en choisis toi-même, dis-le)
-   - Une préférence de couleurs, ou vous partez sur celles de votre logo ?
-   - Par où doit-on vous contacter : WhatsApp, téléphone, e-mail ?
-   - Le nom exact de l'établissement et ce qu'il propose, si tu ne le sais pas encore.
+   N'écris jamais la liste des questions toi-même : le formulaire s'en charge, à cocher, et
+   c'est bien plus rapide pour le client que de rédiger des réponses. Ne demande pas non
+   plus le logo par écrit, le formulaire a son bouton d'envoi.
 
-   Ne pose jamais une question dont le client t'a déjà donné la réponse. Termine toujours
-   par une porte de sortie du genre : "Et si vous préférez, dites-moi simplement « allez-y »
-   et je me lance avec mes propres choix — on ajustera ensuite."
+2. DÈS LA RÉPONSE au formulaire — même partielle, même si le client l'a passé — tu
+   construis le site. Tu ne redemandes JAMAIS ces informations : ce qui manque, tu le
+   décides toi-même et tu le signales en une phrase après coup. N'appelle plus jamais
+   ask_brief dans cette conversation.
 
-2. DÈS LA RÉPONSE du client — même partielle, même "je ne sais pas", même "allez-y" — tu
-   construis le site. Tu ne poses JAMAIS une deuxième série de questions : ce qui manque,
-   tu le décides toi-même et tu le signales en une phrase après coup.
-
-3. PASSE DIRECTEMENT à la construction, sans aucune question, quand :
+3. PASSE DIRECTEMENT à la construction, sans formulaire, quand :
    - le client demande une modification d'un site déjà affiché ;
    - il a joint une image de référence ou du code ;
    - il a déjà décrit sa marque, ses couleurs ou son activité en détail ;
@@ -131,6 +125,13 @@ const PREVIEW_TOOL: Anthropic.Tool = {
     },
     required: ["site_name", "files"],
   },
+};
+
+const ASK_BRIEF_TOOL: Anthropic.Tool = {
+  name: "ask_brief",
+  description:
+    "Affiche au client un petit formulaire à cocher (logo, couleurs, photos, contact) au lieu de lui poser les questions en texte. À appeler une seule fois, au tout début d'un nouveau site, accompagné d'une phrase d'introduction chaleureuse. Le client peut le remplir, le passer, ou répondre en texte libre.",
+  input_schema: { type: "object", properties: {} },
 };
 
 const SEARCH_PHOTOS_TOOL: Anthropic.Tool = {
@@ -298,7 +299,9 @@ export async function POST(request: Request) {
 
   // search_photos n'est proposé que si la clé Pexels est configurée : sans elle
   // l'agent ne peut pas chercher d'images, mais il génère toujours le site.
-  const tools = hasPexels() ? [SEARCH_PHOTOS_TOOL, PREVIEW_TOOL] : [PREVIEW_TOOL];
+  const tools = hasPexels()
+    ? [ASK_BRIEF_TOOL, SEARCH_PHOTOS_TOOL, PREVIEW_TOOL]
+    : [ASK_BRIEF_TOOL, PREVIEW_TOOL];
 
   // Boucle d'outils : l'agent peut chercher ses photos puis rédiger le site
   // dans le même tour. La borne évite qu'il boucle indéfiniment sur des
@@ -349,6 +352,27 @@ export async function POST(request: Request) {
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "preview_site",
     );
     if (toolUse) break;
+
+    // Demande de brief : le formulaire est rendu côté client, le tour s'arrête
+    // là et reprendra quand le client aura répondu.
+    const briefCall = response.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "ask_brief",
+    );
+    if (briefCall) {
+      await persist("assistant", response.content);
+      await persist("user", [
+        {
+          type: "tool_result",
+          tool_use_id: briefCall.id,
+          content: JSON.stringify({ status: "formulaire_affiche_au_client" }),
+        },
+      ]);
+      return NextResponse.json({
+        conversationId,
+        reply: text?.text ?? "Quelques questions rapides pour coller à votre style :",
+        brief: true,
+      });
+    }
 
     const photoCalls = response.content.filter(
       (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "search_photos",

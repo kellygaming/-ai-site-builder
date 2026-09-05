@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, GitFork, Loader2, MessageSquare, Monitor, Plus, Rocket } from "lucide-react";
 import { SiteBuilderChat } from "@/components/ui/chat-input";
+import { BriefForm, type BriefAnswers } from "@/components/ui/brief-form";
 import { cn } from "@/lib/utils";
 
 interface SiteFile {
@@ -124,6 +125,7 @@ export function ChatPanel() {
   // remontage sur le HTML d'origine plutôt que de laisser le client devant une
   // page qui n'est pas son site.
   const [frameNonce, setFrameNonce] = useState(0);
+  const [showBrief, setShowBrief] = useState(false);
 
   const turnsEndRef = useRef<HTMLDivElement>(null);
   const frameLoadsRef = useRef(0);
@@ -194,6 +196,7 @@ export function ChatPanel() {
 
   function startNewSite() {
     rememberConversation(null);
+    setShowBrief(false);
     setTurns([]);
     setConversationId(null);
     setPreviewHtml(null);
@@ -215,6 +218,7 @@ export function ChatPanel() {
       }
     }
 
+    setShowBrief(false);
     const label = value.trim() || `📎 ${files.length} fichier(s) joint(s)`;
     setTurns((t) => [...t, { role: "user", text: label }]);
     setLoading(true);
@@ -230,7 +234,13 @@ export function ChatPanel() {
       // on le distingue pour donner une consigne utile plutôt qu'un message
       // générique de panne réseau.
       const raw = await res.text();
-      let data: { conversationId?: string; reply?: string; error?: string; files?: SiteFile[] };
+      let data: {
+        conversationId?: string;
+        reply?: string;
+        error?: string;
+        files?: SiteFile[];
+        brief?: boolean;
+      };
       try {
         data = JSON.parse(raw);
       } catch {
@@ -262,6 +272,8 @@ export function ChatPanel() {
 
       setTurns((t) => [...t, { role: "assistant", text: data.reply ?? "" }]);
 
+      setShowBrief(Boolean(data.brief));
+
       const indexFile = data.files?.find((f) => f.path.endsWith("index.html"));
       if (indexFile) {
         setPreviewHtml(indexFile.content);
@@ -278,6 +290,48 @@ export function ChatPanel() {
     } finally {
       setLoading(false);
     }
+  }
+
+  /**
+   * Le formulaire est une commodité d'interface : l'agent, lui, reçoit une
+   * réponse en français, exactement comme si le client l'avait rédigée. Rien
+   * de nouveau à lui apprendre, et l'historique reste lisible à la relecture.
+   */
+  function handleBriefSubmit(answers: BriefAnswers) {
+    const lines: string[] = [];
+
+    if (answers.businessName) lines.push(`L'établissement s'appelle ${answers.businessName}.`);
+    lines.push(
+      answers.hasLogo
+        ? "Voici mon logo, mettez-le sur le site."
+        : "Je n'ai pas encore de logo, écrivez joliment le nom à la place.",
+    );
+
+    if (answers.colorChoice === "logo") lines.push("Reprenez les couleurs de mon logo.");
+    else if (answers.colorChoice === "custom" && answers.customColors)
+      lines.push(`Pour les couleurs, je veux : ${answers.customColors}.`);
+    else lines.push("Je vous laisse choisir les couleurs.");
+
+    lines.push(
+      answers.photoChoice === "mine"
+        ? "J'ai joint mes propres photos, servez-vous-en."
+        : "Choisissez vous-même de belles photos.",
+    );
+
+    const contacts = [
+      answers.whatsapp && `WhatsApp / téléphone : ${answers.whatsapp}`,
+      answers.email && `E-mail : ${answers.email}`,
+    ].filter(Boolean);
+    if (contacts.length > 0) lines.push(`On me joint ici — ${contacts.join(", ")}.`);
+
+    if (answers.extra) lines.push(answers.extra);
+
+    handleSubmit(lines.join("\n"), answers.files);
+  }
+
+  function handleBriefSkip() {
+    setShowBrief(false);
+    handleSubmit("Allez-y directement avec vos propres choix, on ajustera ensuite.", []);
   }
 
   async function handlePublish() {
@@ -386,6 +440,13 @@ export function ChatPanel() {
                   <p className="leading-relaxed whitespace-pre-wrap">{turn.text}</p>
                 </div>
               ))}
+              {showBrief && !loading && (
+                <BriefForm
+                  onSubmit={handleBriefSubmit}
+                  onSkip={handleBriefSkip}
+                  disabled={loading}
+                />
+              )}
               {loading && (
                 <div className="flex items-center gap-2 self-start text-xs text-text-secondary">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
