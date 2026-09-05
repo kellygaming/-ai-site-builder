@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, GitFork, Loader2, MessageSquare, Monitor, Plus, Rocket } from "lucide-react";
 import { SiteBuilderChat } from "@/components/ui/chat-input";
 import { BriefForm, type BriefAnswers } from "@/components/ui/brief-form";
+import { prepareImages } from "@/lib/image-prep";
 import { cn } from "@/lib/utils";
 
 interface SiteFile {
@@ -16,8 +17,10 @@ interface Turn {
   text: string;
 }
 
-const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const MAX_TEXT_FILE_BYTES = 200_000;
+/** Formats à lire comme du code/texte plutôt qu'à décoder comme une image. */
+const TEXTUAL_EXTENSIONS =
+  /\.(html?|css|js|jsx|ts|tsx|json|md|txt|svg|vue|svelte|py|php|rb|java|go|rs|c|cpp)$/i;
 
 /**
  * L'aperçu est rendu via srcDoc : l'iframe n'a pas d'URL propre, donc un lien
@@ -99,15 +102,6 @@ function rememberConversation(id: string | null) {
   } catch {
     // Navigation privée ou stockage refusé : on continue sans mémoire.
   }
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve((reader.result as string).split(",")[1] ?? "");
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 export function ChatPanel() {
@@ -207,15 +201,35 @@ export function ChatPanel() {
   async function handleSubmit(value: string, files: File[]) {
     if (!value.trim() && files.length === 0) return;
 
-    const images: { mediaType: string; data: string }[] = [];
-    const textFiles: { name: string; content: string }[] = [];
+    // On sépare sur l'intention, pas sur une liste blanche de types MIME : un
+    // iPhone annonce "image/heic", que l'ancienne liste ne connaissait pas, et
+    // la photo était silencieusement jetée.
+    const textCandidates = files.filter(
+      (file) => TEXTUAL_EXTENSIONS.test(file.name) || file.type.startsWith("text/"),
+    );
+    const imageCandidates = files.filter((file) => !textCandidates.includes(file));
 
-    for (const file of files) {
-      if (SUPPORTED_IMAGE_TYPES.has(file.type)) {
-        images.push({ mediaType: file.type, data: await fileToBase64(file) });
-      } else if (file.size <= MAX_TEXT_FILE_BYTES) {
+    const { images, rejected } = await prepareImages(imageCandidates);
+
+    const textFiles: { name: string; content: string }[] = [];
+    for (const file of textCandidates) {
+      if (file.size <= MAX_TEXT_FILE_BYTES) {
         textFiles.push({ name: file.name, content: await file.text() });
+      } else {
+        rejected.push({ name: file.name, reason: "fichier trop volumineux" });
       }
+    }
+
+    if (images.length === 0 && textFiles.length === 0 && files.length > 0 && !value.trim()) {
+      setTurns((t) => [
+        ...t,
+        {
+          role: "assistant",
+          text: `Je n'ai pas réussi à lire ${rejected.map((r) => r.name).join(", ")}. Réessayez en enregistrant l'image en JPG ou PNG depuis votre téléphone.`,
+        },
+      ]);
+      setShowBrief(false);
+      return;
     }
 
     setShowBrief(false);
