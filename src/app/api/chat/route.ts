@@ -474,7 +474,18 @@ export async function POST(request: Request) {
       content: [
         {
           type: "text",
-          text: "Voici ton site tel qu'il s'affiche vraiment, en grand écran puis sur téléphone. Regarde-le comme le ferait le client : texte illisible ou tronqué, éléments qui se chevauchent ou débordent, images étirées ou vides, contraste insuffisant, section vide, mise en page cassée sur mobile. Si tu vois un défaut sérieux, renvoie la page corrigée avec preview_site et dis en une phrase ce que tu as repris. Si le rendu est bon, réponds simplement au client sans rappeler d'outil — ne refais pas la page pour des broutilles.",
+          text: [
+            "Voici ton site tel qu'il s'affiche vraiment, en grand écran puis sur téléphone.",
+            "",
+            shots.findings.length > 0
+              ? `Un contrôle automatique a relevé ceci — ce sont des faits mesurés dans la page, pas des avis :\n${shots.findings
+                  .map((f) => `- [${f.severity}] ${f.message}`)
+                  .join("\n")}\n\nCorrige au moins tous les constats de gravité haute.`
+              : "Le contrôle automatique n'a rien relevé.",
+            "",
+            "Regarde aussi les captures comme le ferait le client : texte tronqué, éléments qui se chevauchent, images étirées ou vides, section vide, mise en page cassée sur mobile.",
+            "S'il y a quoi que ce soit à reprendre, renvoie la page corrigée avec preview_site et dis en une phrase ce que tu as repris. Si tout est bon, réponds simplement au client sans rappeler d'outil.",
+          ].join("\n"),
         },
         { type: "image", source: { type: "base64", media_type: "image/png", data: shots.desktop } },
         { type: "image", source: { type: "base64", media_type: "image/png", data: shots.mobile } },

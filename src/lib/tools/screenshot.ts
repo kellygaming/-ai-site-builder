@@ -1,6 +1,7 @@
 import "server-only";
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
+import { auditInPage, type AuditFinding } from "./audit-script";
 
 /**
  * Relecture visuelle de l'agent — l'idée du skill Claude Code "webapp-testing"
@@ -15,6 +16,8 @@ import puppeteer from "puppeteer-core";
 export interface Screenshots {
   desktop: string;
   mobile: string;
+  /** Constats du contrôle automatique, les plus graves d'abord. */
+  findings: AuditFinding[];
 }
 
 /** Sans binaire Chromium disponible, la relecture est simplement sautée. */
@@ -45,12 +48,20 @@ export async function captureHtml(html: string): Promise<Screenshots | null> {
     await new Promise((r) => setTimeout(r, 1200));
 
     const desktop = Buffer.from(await page.screenshot({ type: "png" })).toString("base64");
+    const deskFindings = await page.evaluate(auditInPage, false);
 
     await page.setViewport(MOBILE);
     await new Promise((r) => setTimeout(r, 400));
     const mobile = Buffer.from(await page.screenshot({ type: "png" })).toString("base64");
+    const mobileFindings = await page.evaluate(auditInPage, true);
 
-    return { desktop, mobile };
+    // Les constats de gravité haute passent devant : si l'agent ne corrige
+    // qu'une chose, autant que ce soit la plus coûteuse pour le visiteur.
+    const findings = [...deskFindings, ...mobileFindings].sort((a, b) =>
+      a.severity === b.severity ? 0 : a.severity === "haute" ? -1 : 1,
+    );
+
+    return { desktop, mobile, findings };
   } catch (error) {
     // Une capture ratée ne doit jamais empêcher la livraison du site.
     console.error("[screenshot] capture échouée", error);
