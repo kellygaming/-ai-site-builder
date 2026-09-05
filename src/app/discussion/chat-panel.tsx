@@ -340,6 +340,14 @@ export function ChatPanel() {
 
     if (answers.extra) lines.push(answers.extra);
 
+    if (answers.designPrompt) {
+      lines.push(
+        "",
+        "Voici un design que j'ai choisi sur 21st.dev, construisez mon site en vous appuyant dessus :",
+        answers.designPrompt,
+      );
+    }
+
     handleSubmit(lines.join("\n"), answers.files);
   }
 

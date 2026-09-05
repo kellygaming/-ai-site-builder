@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CheckCircle2, ImageIcon, Upload, X } from "lucide-react";
+import { CheckCircle2, ExternalLink, ImageIcon, Upload, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* Formulaire de brief — structure adaptée du pattern "v-form-8" de 21st.dev
@@ -11,7 +11,16 @@ import { cn } from "@/lib/utils";
    simples, le natif offre déjà la navigation clavier et les libellés associés,
    et sept dépendances supplémentaires pour un seul écran ne se justifient pas. */
 
-const STEPS = ["Votre marque", "Le style", "Vous joindre"] as const;
+const STEPS = ["Votre marque", "Le style", "Vous joindre", "Le design"] as const;
+
+/* Liens pré-filtrés vers 21st.dev. On n'envoie jamais le client sur l'accueil :
+   12 000 composants, c'est de la richesse pour nous et de la paralysie pour lui. */
+const DESIGN_LINKS = [
+  { label: "Bannières d'accueil", href: "https://21st.dev/s/hero" },
+  { label: "Sections tarifs", href: "https://21st.dev/s/pricing" },
+  { label: "Avis clients", href: "https://21st.dev/s/testimonials" },
+  { label: "Pieds de page", href: "https://21st.dev/s/footer" },
+];
 
 export interface BriefAnswers {
   businessName: string;
@@ -22,6 +31,8 @@ export interface BriefAnswers {
   whatsapp: string;
   email: string;
   extra: string;
+  /** Prompt copié depuis 21st.dev, si le client est allé en chercher un. */
+  designPrompt: string;
   files: File[];
 }
 
@@ -44,6 +55,7 @@ export function BriefForm({ onSubmit, onSkip, disabled }: BriefFormProps) {
   const [whatsapp, setWhatsapp] = useState("");
   const [email, setEmail] = useState("");
   const [extra, setExtra] = useState("");
+  const [designPrompt, setDesignPrompt] = useState("");
 
   const logoInputRef = useRef<HTMLInputElement>(null);
   const photosInputRef = useRef<HTMLInputElement>(null);
@@ -58,6 +70,7 @@ export function BriefForm({ onSubmit, onSkip, disabled }: BriefFormProps) {
       whatsapp: whatsapp.trim(),
       email: email.trim(),
       extra: extra.trim(),
+      designPrompt: designPrompt.trim(),
       files: [...(logo ? [logo] : []), ...photos],
     });
   }
@@ -296,9 +309,50 @@ export function BriefForm({ onSubmit, onSkip, disabled }: BriefFormProps) {
             />
           </Question>
 
+          <StepButtons onBack={() => setStep(1)} onNext={() => setStep(3)} onSkip={onSkip} />
+        </div>
+      )}
+
+      {step === 3 && (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <p className="text-sm font-medium text-text">
+              Tout est prêt — une dernière chose, si vous avez deux minutes
+            </p>
+            <p className="text-xs leading-relaxed text-text-secondary">
+              La plupart des sites faits par IA se ressemblent tous. Pour éviter ça, allez
+              choisir un design signé par un vrai designer : ouvrez un lien, prenez ce qui
+              vous plaît, cliquez sur <strong className="text-text">Copy prompt</strong> et
+              collez-le ci-dessous. Je construis votre site à partir de là.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {DESIGN_LINKS.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs text-text-secondary transition-colors hover:border-accent hover:text-text"
+              >
+                <ExternalLink className="size-3.5" />
+                {link.label}
+              </a>
+            ))}
+          </div>
+
+          <textarea
+            value={designPrompt}
+            onChange={(event) => setDesignPrompt(event.target.value)}
+            rows={4}
+            placeholder="Collez ici le prompt copié sur 21st.dev…"
+            className={cn(inputClass, "resize-none font-mono-ui text-xs")}
+          />
+
           <div className="flex flex-col gap-2">
             <div className="flex gap-2">
-              <button type="button" onClick={() => setStep(1)} className={secondaryButtonClass}>
+              <button type="button" onClick={() => setStep(2)} className={secondaryButtonClass}>
                 Retour
               </button>
               <button
@@ -307,10 +361,12 @@ export function BriefForm({ onSubmit, onSkip, disabled }: BriefFormProps) {
                 disabled={disabled}
                 className={cn(primaryButtonClass, "flex-1")}
               >
-                Créer mon site
+                {designPrompt.trim() ? "Créer mon site sur ce design" : "Créer mon site"}
               </button>
             </div>
-            <SkipLink onSkip={onSkip} />
+            <p className="text-center text-xs text-muted">
+              Vous pouvez aussi lancer sans : on ajustera ensemble après.
+            </p>
           </div>
         </div>
       )}
