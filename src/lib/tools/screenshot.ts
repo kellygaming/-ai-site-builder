@@ -3,50 +3,57 @@ import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 
 /**
- * Adapté du skill Claude Code "webapp-testing" (Playwright + serveur local) —
- * inutilisable tel quel dans une fonction serverless : pas de Bash, pas de
- * serveur local à gérer puisqu'on capture directement l'URL Vercel déjà en
- * ligne. Même idée de "reconnaissance avant action" (regarder le rendu
- * réel avant de conclure), avec Puppeteer headless au lieu de Playwright.
+ * Relecture visuelle de l'agent — l'idée du skill Claude Code "webapp-testing"
+ * (regarder le rendu réel avant de conclure), portée dans une fonction
+ * serverless : ni Bash, ni serveur local, ni Playwright.
+ *
+ * La version précédente capturait une URL déjà déployée. Depuis que l'aperçu
+ * n'est plus publié, il n'y a plus d'URL : on injecte donc le HTML directement
+ * dans la page avec setContent, ce qui est aussi bien plus rapide.
  */
 
-/** Attend que l'URL réponde 200 (une déploiement fraîche peut mettre 1-2s à se propager). */
-async function waitUntilLive(url: string, timeoutMs = 8000): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const res = await fetch(url, { method: "GET", cache: "no-store" });
-      if (res.ok) return true;
-    } catch {
-      // pas encore prêt, on retente
-    }
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  return false;
+export interface Screenshots {
+  desktop: string;
+  mobile: string;
 }
 
-/** Retourne un PNG en base64 du site déployé, ou null si la capture échoue (non bloquant). */
-export async function captureScreenshot(url: string): Promise<string | null> {
-  const live = await waitUntilLive(url);
-  if (!live) return null;
+/** Sans binaire Chromium disponible, la relecture est simplement sautée. */
+export function canRender(): boolean {
+  return process.env.DISABLE_VISUAL_REVIEW !== "1";
+}
 
+const DESKTOP = { width: 1440, height: 900 };
+/** Format iPhone : c'est là que les sites générés cassent le plus souvent. */
+const MOBILE = { width: 390, height: 844 };
+
+export async function captureHtml(html: string): Promise<Screenshots | null> {
   let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+
   try {
     browser = await puppeteer.launch({
       args: chromium.args,
-      defaultViewport: { width: 1280, height: 800 },
+      defaultViewport: DESKTOP,
       executablePath: await chromium.executablePath(),
       headless: true,
     });
+
     const page = await browser.newPage();
-    // domcontentloaded + court délai plutôt que networkidle0 : sur un site
-    // statique le rendu est déjà là, et networkidle0 peut coûter plusieurs
-    // secondes de plus qu'on n'a pas dans le budget de la fonction.
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
-    await new Promise((r) => setTimeout(r, 800));
-    const buffer = await page.screenshot({ type: "png" });
-    return Buffer.from(buffer).toString("base64");
-  } catch {
+    // networkidle0 attendrait chaque photo distante ; on borne plutôt le temps
+    // de chargement, quitte à capturer une image encore en cours d'arrivée.
+    await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 15000 });
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r(null))));
+    await new Promise((r) => setTimeout(r, 1200));
+
+    const desktop = Buffer.from(await page.screenshot({ type: "png" })).toString("base64");
+
+    await page.setViewport(MOBILE);
+    await new Promise((r) => setTimeout(r, 400));
+    const mobile = Buffer.from(await page.screenshot({ type: "png" })).toString("base64");
+
+    return { desktop, mobile };
+  } catch (error) {
+    // Une capture ratée ne doit jamais empêcher la livraison du site.
+    console.error("[screenshot] capture échouée", error);
     return null;
   } finally {
     await browser?.close();

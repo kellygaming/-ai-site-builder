@@ -5,6 +5,7 @@ import { DESIGN_REFERENCE, FRONTEND_DESIGN_GUIDANCE } from "@/lib/design-referen
 import { MOTION_REFERENCE } from "@/lib/motion-reference";
 import { hasPexels, searchPhotos } from "@/lib/tools/pexels";
 import { uploadClientImage } from "@/lib/tools/storage";
+import { canRender, captureHtml } from "@/lib/tools/screenshot";
 import type { Json } from "@/lib/supabase/types";
 
 // Plan Vercel Pro : plafond de fonction à 300s (contre 60s en Hobby). C'est
@@ -98,6 +99,14 @@ Règles :
   (voir la section dédiée plus bas). Quand tu en mets, recopie la recette fournie telle
   quelle plutôt que d'improviser. Quand tu n'en mets pas, dis-le au client en une phrase :
   il doit comprendre que c'est un choix, pas un oubli.
+- CONTENU D'EXEMPLE : les avis clients et les textes que tu inventes sont des exemples
+  destinés à montrer le rendu, et tu DOIS le dire au client dans ta réponse, en une phrase
+  claire du genre "les avis affichés sont des exemples, envoyez-moi les vrais et je les
+  remplace". En revanche, n'invente JAMAIS un chiffre à fausse précision qui se lit comme
+  un fait vérifiable : "98 % de patients satisfaits", "4 800 clients", "certifié ISO",
+  un prix ou un horaire non fournis. Un faux avis se corrige, un faux chiffre engage la
+  responsabilité de ton client. Si le client ne t'a pas donné le chiffre, écris la section
+  sans chiffre.
 - Accompagne toujours ton appel d'outil d'une phrase courte en français : ce que tu as fait
   et ce que le client peut te demander d'ajuster.
 
@@ -443,6 +452,85 @@ export async function POST(request: Request) {
     });
   }
 
+  // ---- Relecture visuelle -------------------------------------------------
+  // L'agent écrit son site à l'aveugle : il ne l'a jamais vu. On le lui montre
+  // rendu, en desktop et en mobile, et il corrige avant que le client découvre
+  // la page. Uniquement à la première version : sur un simple ajustement
+  // demandé par le client, ce tour supplémentaire coûterait une minute pour
+  // rien.
+  async function runVisualReview(
+    call: Anthropic.ToolUseBlock,
+    draft: SiteFile[],
+  ): Promise<{ files: SiteFile[]; reply: string } | null> {
+    const index = draft.find((file) => file.path.endsWith("index.html"));
+    if (!index) return null;
+
+    const shots = await captureHtml(index.content);
+    if (!shots) return null;
+
+    const review: Anthropic.ToolResultBlockParam = {
+      type: "tool_result",
+      tool_use_id: call.id,
+      content: [
+        {
+          type: "text",
+          text: "Voici ton site tel qu'il s'affiche vraiment, en grand écran puis sur téléphone. Regarde-le comme le ferait le client : texte illisible ou tronqué, éléments qui se chevauchent ou débordent, images étirées ou vides, contraste insuffisant, section vide, mise en page cassée sur mobile. Si tu vois un défaut sérieux, renvoie la page corrigée avec preview_site et dis en une phrase ce que tu as repris. Si le rendu est bon, réponds simplement au client sans rappeler d'outil — ne refais pas la page pour des broutilles.",
+        },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: shots.desktop } },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: shots.mobile } },
+      ],
+    };
+
+    await persist("user", [review]);
+    messages.push({ role: "assistant", content: response.content });
+    messages.push({ role: "user", content: [review] });
+
+    let second: Anthropic.Message;
+    try {
+      second = await client.messages.create({
+        model: "claude-sonnet-5",
+        max_tokens: 16000,
+        system: [
+          { type: "text", text: BASE_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ],
+        tools,
+        messages,
+      });
+    } catch (error) {
+      // La relecture est un bonus : en cas d'échec on livre la première
+      // version. Retour non nul car le tool_use a déjà été refermé par le
+      // résultat contenant les captures — le refermer deux fois casserait
+      // l'historique au tour suivant.
+      console.error("[chat] relecture visuelle échouée", error);
+      return { files: draft, reply: "" };
+    }
+
+    await persist("assistant", second.content);
+    const secondText = second.content.find((b): b is Anthropic.TextBlock => b.type === "text");
+    const revision = second.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use" && b.name === "preview_site",
+    );
+
+    if (!revision || second.stop_reason === "max_tokens") {
+      return { files: draft, reply: secondText?.text ?? "" };
+    }
+
+    const revised = parseSiteFiles((revision.input as Record<string, unknown>).files);
+    if (!revised) return { files: draft, reply: secondText?.text ?? "" };
+
+    await persist("user", [
+      {
+        type: "tool_result",
+        tool_use_id: revision.id,
+        content: JSON.stringify({ status: "preview_shown_to_client" }),
+      },
+    ]);
+
+    const merged = new Map(draft.map((file) => [file.path, file]));
+    for (const file of revised) merged.set(file.path, file);
+    return { files: Array.from(merged.values()), reply: secondText?.text ?? "" };
+  }
+
   const siteName =
     typeof input.site_name === "string" && input.site_name.trim()
       ? input.site_name.trim()
@@ -454,27 +542,44 @@ export async function POST(request: Request) {
   for (const file of files) merged.set(file.path, file);
   const fullFileSet = Array.from(merged.values());
 
+  // Un retour non nul signifie que la relecture a refermé elle-même l'appel
+  // d'outil ; un retour nul veut dire qu'elle n'a pas démarré et qu'il reste à
+  // le faire ici.
+  const reviewed =
+    currentFiles.length === 0 && canRender()
+      ? await runVisualReview(toolUse, fullFileSet)
+      : null;
+
+  const deliveredFiles = reviewed?.files ?? fullFileSet;
+  const deliveredReply =
+    reviewed?.reply?.trim() ||
+    text?.text ||
+    "Voici votre site. Dites-moi ce que vous voulez ajuster.";
+
   await supabase
     .from("conversations")
     .update({
-      current_files: fullFileSet as unknown as Json,
+      current_files: deliveredFiles as unknown as Json,
       vercel_project_name: siteName,
     })
     .eq("id", conversationId!);
 
-  // L'outil ne publie rien : on renvoie juste un résultat neutre pour garder un
-  // historique cohérent côté API (chaque tool_use doit avoir son tool_result).
-  await persist("user", [
-    {
-      type: "tool_result",
-      tool_use_id: toolUse.id,
-      content: JSON.stringify({ status: "preview_shown_to_client" }),
-    },
-  ]);
+  if (!reviewed) {
+    // L'outil ne publie rien : on renvoie juste un résultat neutre pour garder
+    // un historique cohérent côté API (chaque tool_use doit avoir son
+    // tool_result).
+    await persist("user", [
+      {
+        type: "tool_result",
+        tool_use_id: toolUse.id,
+        content: JSON.stringify({ status: "preview_shown_to_client" }),
+      },
+    ]);
+  }
 
   return NextResponse.json({
     conversationId,
-    reply: text?.text ?? "Voici votre site. Dites-moi ce que vous voulez ajuster.",
-    files: fullFileSet,
+    reply: deliveredReply,
+    files: deliveredFiles,
   });
 }
