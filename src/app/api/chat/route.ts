@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { DESIGN_REFERENCE, FRONTEND_DESIGN_GUIDANCE } from "@/lib/design-reference";
+import { ARCHITECTURE_REFERENCE } from "@/lib/architecture-reference";
 import { MOTION_REFERENCE } from "@/lib/motion-reference";
 import { hasPexels, searchPhotos } from "@/lib/tools/pexels";
 import { uploadClientImage } from "@/lib/tools/storage";
@@ -93,10 +94,12 @@ Règles :
   dans une iframe : des fichiers séparés ne se chargeraient pas). N'ajoute d'autres fichiers
   que si le client demande explicitement plusieurs pages.
 - Sur une demande de modification, renvoie l'index.html COMPLET modifié, pas un extrait.
-- Vise une page complète et finie : 4 à 6 sections réelles (hero, offre/services, preuve
-  sociale ou galerie, à-propos, contact). Termine toujours ce que tu commences — une page
-  tronquée en plein milieu ne vaut rien. Pas de commentaires dans le code, du CSS ramassé
-  (variables CSS, pas de répétitions).
+- OSSATURE : commence par choisir l'ossature de page adaptée au métier du client, dans la
+  section dédiée plus bas, et annonce ton choix en une phrase. N'enchaîne JAMAIS par défaut
+  bannière / grille de cartes / galerie / "notre histoire" / témoignages / contact : c'est
+  la séquence que produisent tous les générateurs, et elle se reconnaît au premier coup
+  d'œil. Termine toujours ce que tu commences — une page tronquée en plein milieu ne vaut
+  rien. Pas de commentaires dans le code, du CSS ramassé (variables CSS, pas de répétitions).
 - Design soigné, moderne, responsive, en français, cohérent avec ce que le client décrit.
 - Pas de bibliothèque JS ni de framework externe. Ressources externes autorisées : les
   polices Google Fonts, et les photos renvoyées par l'outil search_photos.
@@ -129,6 +132,7 @@ site demandé, règles UX toujours respectées) plutôt que d'improviser à l'av
 les couleurs/polices exactes si le client a une préférence explicite, et laisse toujours les
 principes de design ci-dessus primer sur le tableau si les deux se contredisent.
 ${DESIGN_REFERENCE}
+${ARCHITECTURE_REFERENCE}
 ${MOTION_REFERENCE}`;
 
 const PREVIEW_TOOL: Anthropic.Tool = {
