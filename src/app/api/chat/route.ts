@@ -25,6 +25,59 @@ const client = new Anthropic(
     : {},
 );
 
+/**
+ * Deux régimes de consignes de design, pour pouvoir mesurer ce que les nôtres
+ * apportent vraiment.
+ *
+ * "guided" (défaut) : palettes, ossatures de page et recette d'animation, plus
+ * les règles qui vont avec. C'est ce qu'on a construit jusqu'ici.
+ *
+ * "free" : on retire tout ça et on ne garde que le guide de design de fond
+ * (frontend-design), en laissant le modèle décider seul. Les contraintes
+ * TECHNIQUES restent dans les deux cas — un seul fichier, pas de framework,
+ * pas d'URL d'image inventée : ce ne sont pas des avis esthétiques, ce sont les
+ * conditions pour que la page s'affiche.
+ *
+ * Bascule avec la variable d'environnement DESIGN_MODE sur Vercel.
+ */
+const FREE_DESIGN = process.env.DESIGN_MODE === "free";
+
+const GUIDED_LAYOUT_RULE = FREE_DESIGN
+  ? `- Compose la page comme tu le juges juste pour ce métier. Termine toujours ce que tu
+  commences — une page tronquée en plein milieu ne vaut rien. Pas de commentaires dans le
+  code, du CSS ramassé (variables CSS, pas de répétitions).
+`
+  : `- OSSATURE : commence par choisir l'ossature de page adaptée au métier du client, dans la
+  section dédiée plus bas, et annonce ton choix en une phrase. N'enchaîne JAMAIS par défaut
+  bannière / grille de cartes / galerie / "notre histoire" / témoignages / contact : c'est
+  la séquence que produisent tous les générateurs, et elle se reconnaît au premier coup
+  d'œil. Termine toujours ce que tu commences — une page tronquée en plein milieu ne vaut
+  rien. Pas de commentaires dans le code, du CSS ramassé (variables CSS, pas de répétitions).
+`;
+
+// Même en régime libre, une règle de correction subsiste : masquer le contenu
+// en attendant un script, c'est livrer une page blanche à qui n'exécute pas le
+// JavaScript. Ce n'est pas une question de goût.
+const MOTION_RULE = FREE_DESIGN
+  ? `- Si tu animes des éléments à l'apparition, le contenu doit rester lisible quand le
+  JavaScript ne s'exécute pas, et \`prefers-reduced-motion\` doit être respecté.
+`
+  : `- ANIMATIONS : décide pour CHAQUE projet si le site en mérite, selon le métier du client
+  (voir la section dédiée plus bas). Quand tu en mets, recopie la recette fournie telle
+  quelle plutôt que d'improviser. Quand tu n'en mets pas, dis-le au client en une phrase :
+  il doit comprendre que c'est un choix, pas un oubli.
+`;
+
+const GUIDED_REFERENCES = FREE_DESIGN
+  ? ""
+  : `Utilise la référence ci-dessous comme point de départ (palette + police adaptées au type de
+site demandé, règles UX toujours respectées) plutôt que d'improviser à l'aveugle — adapte
+les couleurs/polices exactes si le client a une préférence explicite, et laisse toujours les
+principes de design ci-dessus primer sur le tableau si les deux se contredisent.
+${DESIGN_REFERENCE}
+${ARCHITECTURE_REFERENCE}
+${MOTION_REFERENCE}`;
+
 const BASE_SYSTEM_PROMPT = `Tu es l'agent de construction de sites d'AI Site Builder. Le
 client te décrit en langage courant le site qu'il veut, ou te demande de modifier le site
 en cours. Tu conçois un site statique (HTML/CSS/JS, sans framework ni étape de build) et tu
@@ -94,13 +147,7 @@ Règles :
   dans une iframe : des fichiers séparés ne se chargeraient pas). N'ajoute d'autres fichiers
   que si le client demande explicitement plusieurs pages.
 - Sur une demande de modification, renvoie l'index.html COMPLET modifié, pas un extrait.
-- OSSATURE : commence par choisir l'ossature de page adaptée au métier du client, dans la
-  section dédiée plus bas, et annonce ton choix en une phrase. N'enchaîne JAMAIS par défaut
-  bannière / grille de cartes / galerie / "notre histoire" / témoignages / contact : c'est
-  la séquence que produisent tous les générateurs, et elle se reconnaît au premier coup
-  d'œil. Termine toujours ce que tu commences — une page tronquée en plein milieu ne vaut
-  rien. Pas de commentaires dans le code, du CSS ramassé (variables CSS, pas de répétitions).
-- DEMANDE TROP AMBITIEUSE pour une seule page (beaucoup de sections, plusieurs pages, un
+${GUIDED_LAYOUT_RULE}- DEMANDE TROP AMBITIEUSE pour une seule page (beaucoup de sections, plusieurs pages, un
   catalogue entier) : ne refuse JAMAIS et ne rogne pas partout. Construis d'abord le cœur
   du site — l'en-tête, la bannière et les 2 ou 3 sections les plus importantes, entièrement
   finies et soignées — montre-le, puis dis en une phrase ce que tu ajoutes ensuite : "voici
@@ -119,11 +166,7 @@ Règles :
   alt descriptif, l'attribut loading="lazy" sauf celle de la hero, et une hauteur/largeur maîtrisée
   (object-fit: cover) pour éviter que la page saute au chargement. Si l'outil ne renvoie
   rien, compose sans photo plutôt que d'inventer un lien.
-- ANIMATIONS : décide pour CHAQUE projet si le site en mérite, selon le métier du client
-  (voir la section dédiée plus bas). Quand tu en mets, recopie la recette fournie telle
-  quelle plutôt que d'improviser. Quand tu n'en mets pas, dis-le au client en une phrase :
-  il doit comprendre que c'est un choix, pas un oubli.
-- CONTENU D'EXEMPLE : les avis clients et les textes que tu inventes sont des exemples
+${MOTION_RULE}- CONTENU D'EXEMPLE : les avis clients et les textes que tu inventes sont des exemples
   destinés à montrer le rendu, et tu DOIS le dire au client dans ta réponse, en une phrase
   claire du genre "les avis affichés sont des exemples, envoyez-moi les vrais et je les
   remplace". En revanche, n'invente JAMAIS un chiffre à fausse précision qui se lit comme
@@ -135,13 +178,7 @@ Règles :
   et ce que le client peut te demander d'ajuster.
 
 ${FRONTEND_DESIGN_GUIDANCE}
-Utilise la référence ci-dessous comme point de départ (palette + police adaptées au type de
-site demandé, règles UX toujours respectées) plutôt que d'improviser à l'aveugle — adapte
-les couleurs/polices exactes si le client a une préférence explicite, et laisse toujours les
-principes de design ci-dessus primer sur le tableau si les deux se contredisent.
-${DESIGN_REFERENCE}
-${ARCHITECTURE_REFERENCE}
-${MOTION_REFERENCE}`;
+${GUIDED_REFERENCES}`;
 
 const PREVIEW_TOOL: Anthropic.Tool = {
   name: "preview_site",
